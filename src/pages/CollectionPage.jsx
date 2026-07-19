@@ -1,14 +1,11 @@
 import {
-  AspectRatio,
   Box,
-  Grid,
-  GridItem,
   Heading,
-  Image,
   Stack,
   Text,
   useColorModeValue,
 } from "@chakra-ui/react";
+import ContactSheetGallery from "../components/gallery/ContactSheetGallery";
 import { Navigate, useParams } from "react-router-dom";
 import { getCollectionById } from "../data/collections";
 import { getPhotosByCollection } from "../data/photos";
@@ -48,40 +45,7 @@ export default function CollectionPage() {
         </Text>
       </Stack>
 
-      <Grid
-        templateColumns={{
-          base: "1fr",
-          sm: "repeat(2, minmax(0, 1fr))",
-          xl: "repeat(3, minmax(0, 1fr))",
-        }}
-        gap={{ base: 5, md: 6 }}
-      >
-        {photos.map((photo) => (
-          <GridItem key={photo.id}>
-            <Box
-              border="1px solid"
-              borderColor="whiteAlpha.200"
-              bg="whiteAlpha.100"
-              borderRadius="8px"
-              overflow="hidden"
-            >
-              <AspectRatio ratio={photo.width / photo.height}>
-                <Image src={photo.src} alt={photo.title} objectFit="cover" />
-              </AspectRatio>
-              <Stack spacing={1} p={4}>
-                <Heading as="h2" fontSize="md">
-                  {photo.title}
-                </Heading>
-                {photo.description && (
-                  <Text color="whiteAlpha.700" fontSize="sm">
-                    {photo.description}
-                  </Text>
-                )}
-              </Stack>
-            </Box>
-          </GridItem>
-        ))}
-      </Grid>
+      <ContactSheetGallery photos={photos} />
     </Box>
   );
 }

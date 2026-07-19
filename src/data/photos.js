@@ -226,10 +226,12 @@ export const photos = [
   },
 ];
 
-export const featuredPhotos = photos.filter((photo) => photo.featured);
+const byOrder = (a, b) => a.order - b.order;
+
+export const featuredPhotos = photos.filter((photo) => photo.featured).sort(byOrder);
 
 export const getPhotoById = (photoId) =>
   photos.find((photo) => photo.id === photoId);
 
 export const getPhotosByCollection = (collectionId) =>
-  photos.filter((photo) => photo.collectionId === collectionId);
+  photos.filter((photo) => photo.collectionId === collectionId).sort(byOrder);
