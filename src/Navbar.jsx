@@ -1,4 +1,3 @@
-import React from "react";
 import MobileNav from "./navcomponents/MobileNav";
 import SideBarContent from "./navcomponents/SideBarContent";
 
@@ -10,7 +9,7 @@ export default function Navbar() {
   return (
     <>
       <SideBarContent
-        onClose={() => onClose}
+        onClose={onClose}
         display={{ base: "none", md: "block" }}
       />
       <Drawer
