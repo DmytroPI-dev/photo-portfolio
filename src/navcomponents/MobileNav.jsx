@@ -8,10 +8,16 @@ export default function MobileNav({ onOpen, ...rest }) {
         px={{ base: 4, md: 24 }}
         height="20"
         alignItems="center"
-        bg={useColorModeValue("white", "gray.900")}
+        bg={useColorModeValue("white", "black")}
         borderBottomWidth="1px"
-        borderBottomColor={useColorModeValue("gray.200", "gray.700")}
+        borderBottomColor={useColorModeValue("gray.200", "whiteAlpha.200")}
         justifyContent="flex-start"
+        color={useColorModeValue("gray.900", "white")}
+        position="fixed"
+        top={0}
+        left={0}
+        right={0}
+        zIndex="banner"
         {...rest}
       >
         <IconButton
@@ -21,8 +27,8 @@ export default function MobileNav({ onOpen, ...rest }) {
           icon={<FiMenu />}
         />
   
-        <Text fontSize="2xl" ml="8" fontFamily="monospace" fontWeight="bold">
-          Logo
+        <Text fontSize="2xl" ml="8" fontWeight="bold">
+          Dmytro PI
         </Text>
       </Flex>
     );

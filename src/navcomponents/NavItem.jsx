@@ -1,10 +1,15 @@
-import { Box,Flex, Icon } from "@chakra-ui/react";
+import { Box, Flex, Icon, useColorModeValue } from "@chakra-ui/react";
+import { Link as RouterLink, useMatch } from "react-router-dom";
 
-export default function NavItem({ icon, children, ...rest }) {
+export default function NavItem({ icon, children, to, ...rest }) {
+  const isActive = useMatch({ path: to, end: to === "/" });
+  const activeBg = useColorModeValue("gray.100", "whiteAlpha.200");
+  const hoverBg = useColorModeValue("gray.100", "whiteAlpha.200");
+
     return (
       <Box
-        as="a"
-        href="#"
+        as={RouterLink}
+        to={to}
         style={{ textDecoration: "none" }}
         _focus={{ boxShadow: "none" }}
       >
@@ -15,9 +20,9 @@ export default function NavItem({ icon, children, ...rest }) {
           borderRadius="lg"
           role="group"
           cursor="pointer"
+          bg={isActive ? activeBg : "transparent"}
           _hover={{
-            bg: "cyan.400",
-            color: "white",
+            bg: hoverBg,
           }}
           {...rest}
         >

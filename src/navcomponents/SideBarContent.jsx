@@ -10,35 +10,50 @@ import {
 } from "@chakra-ui/react";
 import { MoonIcon, SunIcon } from "@chakra-ui/icons";
 
-import { FiHome, FiTrendingUp, FiCompass, FiStar } from "react-icons/fi";
+import {
+  FiAperture,
+  FiEdit3,
+  FiHome,
+  FiMail,
+  FiMap,
+  FiUser,
+} from "react-icons/fi";
 
 const LinkItems = [
-  { name: "Home", icon: FiHome },
-  { name: "Carousel", icon: FiTrendingUp },
-  { name: "Testimonials", icon: FiCompass },
-  { name: "Contacts", icon: FiStar },
+  { name: "Home", icon: FiHome, to: "/" },
+  { name: "Drawings", icon: FiEdit3, to: "/drawings" },
+  { name: "Nature", icon: FiAperture, to: "/nature" },
+  { name: "Travel", icon: FiMap, to: "/travel" },
+  { name: "About", icon: FiUser, to: "/about" },
+  { name: "Contact", icon: FiMail, to: "/contact" },
 ];
 
 export default function SideBarContent({ onClose, ...rest }) {
-  const { colorMode, toggleColorMode } = useColorMode(); // Hooks for handling color mode (dark/light)
+  const { colorMode, toggleColorMode } = useColorMode();
   return (
     <Box
-      bg={useColorModeValue("white", "gray.900")}
+      bg={useColorModeValue("white", "black")}
       borderRight="1px"
-      borderRightColor={useColorModeValue("gray.200", "gray.700")}
+      borderRightColor={useColorModeValue("gray.200", "whiteAlpha.200")}
       w={{ base: "full", md: 60 }}
       pos="fixed"
       h="full"
+      color={useColorModeValue("gray.900", "white")}
       {...rest}
     >
       <Flex h="20" alignItems="center" mx="8" justifyContent="space-between">
-        <Text fontSize="2xl" fontFamily="monospace" fontWeight="bold">
-          Logo
+        <Text fontSize="2xl" fontWeight="bold">
+          Dmytro PI
         </Text>
         <CloseButton display={{ base: "flex", md: "none" }} onClick={onClose} />
       </Flex>
-      {LinkItems.map((link, index) => (
-        <NavItem key={link.name} icon={link.icon}>
+      {LinkItems.map((link) => (
+        <NavItem
+          key={link.name}
+          icon={link.icon}
+          to={link.to}
+          onClick={onClose}
+        >
           {link.name}
         </NavItem>
       ))}
@@ -55,8 +70,7 @@ export default function SideBarContent({ onClose, ...rest }) {
         p="4"
         mx="4"
         _hover={{
-          bg: "cyan.400",
-          color: "white",
+          bg: useColorModeValue("gray.100", "whiteAlpha.200"),
         }}
       >
         {colorMode === "light" ? "Dark Mode" : "Light Mode"}
