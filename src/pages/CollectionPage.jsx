@@ -6,6 +6,7 @@ import {
   useColorModeValue,
 } from "@chakra-ui/react";
 import ContactSheetGallery from "../components/gallery/ContactSheetGallery";
+import DrawingRoomGallery from "../components/drawing-room/DrawingRoomGallery";
 import { Navigate, useParams } from "react-router-dom";
 import { getCollectionById } from "../data/collections";
 import { getPhotosByCollection } from "../data/photos";
@@ -19,6 +20,10 @@ export default function CollectionPage() {
   }
 
   const photos = getPhotosByCollection(collection.id);
+
+  if (collection.id === "drawings") {
+    return <DrawingRoomGallery collection={collection} photos={photos} />;
+  }
 
   return (
     <Box

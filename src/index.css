@@ -20,3 +20,12 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+.drawing-room-gallery canvas + div {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.drawing-room-gallery canvas + div::-webkit-scrollbar {
+  display: none;
+}
