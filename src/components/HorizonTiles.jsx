@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Image, ScrollControls, Scroll, useScroll } from "@react-three/drei";
 import { proxy, useSnapshot } from "valtio";
+import { featuredPhotos } from "../data/photos";
 
 const damp = THREE.MathUtils.damp;
 const material = new THREE.LineBasicMaterial({ color: "white" });
@@ -12,15 +13,12 @@ const geometry = new THREE.BufferGeometry().setFromPoints([
 ]);
 const state = proxy({
   clicked: null,
-  urls: [
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 1, 5, 3, 2, 7, 8, 2, 4, 9, 6,
-  ].map((u) => `/images/${u}.jpg`),
 });
 
 function Minimap() {
   const ref = useRef();
   const scroll = useScroll();
-  const { urls } = useSnapshot(state);
+  const itemCount = featuredPhotos.length;
   const { height } = useThree((state) => state.viewport);
   useFrame((state, delta) => {
     ref.current.children.forEach((child, index) => {
@@ -29,20 +27,20 @@ function Minimap() {
       //   ranging across 4 / total length
       //   make it a sine, so the value goes from 0 to 1 to 0.
       const y = scroll.curve(
-        index / urls.length - 1.5 / urls.length,
-        4 / urls.length
+        index / itemCount - 1.5 / itemCount,
+        4 / itemCount
       );
       child.scale.y = damp(child.scale.y, 0.3 + y / 6, 8, 8, delta);
     });
   });
   return (
     <group ref={ref}>
-      {urls.map((_, i) => (
+      {featuredPhotos.map((photo, i) => (
         <line
-          key={i}
+          key={photo.id}
           geometry={geometry}
           material={material}
-          position={[i * 0.06 - urls.length * 0.03, -height / 2 + 0.6, 0]}
+          position={[i * 0.06 - itemCount * 0.03, -height / 2 + 0.6, 0]}
         />
       ))}
     </group>
@@ -52,15 +50,16 @@ function Minimap() {
 function Item({ index, position, scale, c = new THREE.Color(), ...props }) {
   const ref = useRef();
   const scroll = useScroll();
-  const { clicked, urls } = useSnapshot(state);
+  const { clicked } = useSnapshot(state);
   const [hovered, hover] = useState(false);
   const click = () => (state.clicked = index === clicked ? null : index);
   const over = () => hover(true);
   const out = () => hover(false);
+  const itemCount = featuredPhotos.length;
   useFrame((state, delta) => {
     const y = scroll.curve(
-      index / urls.length - 1.5 / urls.length,
-      4 / urls.length
+      index / itemCount - 1.5 / itemCount,
+      4 / itemCount
     );
     ref.current.material.scale[1] = ref.current.scale.y = damp(
       ref.current.scale.y,
@@ -120,19 +119,18 @@ function Item({ index, position, scale, c = new THREE.Color(), ...props }) {
 }
 
 function Items({ w = 0.7, gap = 0.15 }) {
-  const { urls } = useSnapshot(state);
   const { width } = useThree((state) => state.viewport);
   const xW = w + gap;
   return (
     <ScrollControls
       horizontal
       damping={0.1}
-      pages={(width - xW + urls.length * xW) / width}
+      pages={(width - xW + featuredPhotos.length * xW) / width}
     >
       <Minimap />
       <Scroll>
         {
-          urls.map((url, i) => <Item key={i} index={i} position={[i * xW, 0, 0]} scale={[w, 4, 1]} url={url} />) /* prettier-ignore */
+          featuredPhotos.map((photo, i) => <Item key={photo.id} index={i} position={[i * xW, 0, 0]} scale={[w, 4, 1]} url={photo.src} />) /* prettier-ignore */
         }
       </Scroll>
     </ScrollControls>
