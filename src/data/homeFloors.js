@@ -1,36 +1,65 @@
 import { featuredPhotos, getPhotosByCollection } from "./photos";
 
-// Home uses the same wall-like arrangement on every "floor", then moves the
-// whole stack vertically. Keeping the layout data here makes it easy to tune a
-// floor without digging through React Three Fiber scene code.
-const wraparoundWallLayout = [
-  { position: [0, 0, 1.55], rotation: [0, 0, 0], scale: 1.06 },
-  { position: [-1.05, 0, -0.55], rotation: [0, 0, 0], scale: 0.96 },
-  { position: [1.05, 0, -0.55], rotation: [0, 0, 0], scale: 0.96 },
-  { position: [-2.15, 0, 0.55], rotation: [0, Math.PI / 2.65, 0], scale: 0.95 },
-  { position: [-2.45, 0, 1.85], rotation: [0, Math.PI / 2.65, 0], scale: 0.9 },
-  { position: [2.15, 0, 0.55], rotation: [0, -Math.PI / 2.65, 0], scale: 0.95 },
-  { position: [2.45, 0, 1.85], rotation: [0, -Math.PI / 2.65, 0], scale: 0.9 },
-  { position: [-0.85, 0, -2.45], rotation: [0, 0, 0], scale: 0.86 },
-  { position: [0.85, 0, -2.45], rotation: [0, 0, 0], scale: 0.86 },
-];
+const MAX_PHOTOS_PER_FLOOR = 7;
 
-const createPlacements = (photos) =>
-  photos.map((photo, index) => {
-    const layout = wraparoundWallLayout[index % wraparoundWallLayout.length];
-    const row = Math.floor(index / wraparoundWallLayout.length);
+// Home floors are capped at seven pictures because the elevator camera cannot
+// honestly show nine framed works without the far side images hiding behind the
+// front row. Each count has its own mirrored layout so smaller collections still
+// feel intentional instead of leaving one side of the room empty.
+const mirroredLayouts = {
+  1: [{ position: [0, 0, 1.55], rotation: [0, 0, 0], scale: 1.04 }],
+  2: [
+    { position: [-0.9, 0, 1.35], rotation: [0, 0.08, 0], scale: 0.96 },
+    { position: [0.9, 0, 1.35], rotation: [0, -0.08, 0], scale: 0.96 },
+  ],
+  3: [
+    { position: [0, 0, 1.55], rotation: [0, 0, 0], scale: 1 },
+    { position: [-1.95, 0, 0.65], rotation: [0, Math.PI / 3.05, 0], scale: 0.9 },
+    { position: [1.95, 0, 0.65], rotation: [0, -Math.PI / 3.05, 0], scale: 0.9 },
+  ],
+  4: [
+    { position: [-0.9, 0, 1.35], rotation: [0, 0.08, 0], scale: 0.92 },
+    { position: [0.9, 0, 1.35], rotation: [0, -0.08, 0], scale: 0.92 },
+    { position: [-2.25, 0, 0.65], rotation: [0, Math.PI / 2.95, 0], scale: 0.86 },
+    { position: [2.25, 0, 0.65], rotation: [0, -Math.PI / 2.95, 0], scale: 0.86 },
+  ],
+  5: [
+    { position: [0, 0, 1.55], rotation: [0, 0, 0], scale: 0.96 },
+    { position: [-1.35, 0, -0.45], rotation: [0, 0.03, 0], scale: 0.84 },
+    { position: [1.35, 0, -0.45], rotation: [0, -0.03, 0], scale: 0.84 },
+    { position: [-2.42, 0, 0.85], rotation: [0, Math.PI / 2.95, 0], scale: 0.8 },
+    { position: [2.42, 0, 0.85], rotation: [0, -Math.PI / 2.95, 0], scale: 0.8 },
+  ],
+  6: [
+    { position: [-0.88, 0, -0.55], rotation: [0, 0.03, 0], scale: 0.82 },
+    { position: [0.88, 0, -0.55], rotation: [0, -0.03, 0], scale: 0.82 },
+    { position: [-2.12, 0, 0.35], rotation: [0, Math.PI / 2.95, 0], scale: 0.78 },
+    { position: [2.12, 0, 0.35], rotation: [0, -Math.PI / 2.95, 0], scale: 0.78 },
+    { position: [-2.58, 0, 1.78], rotation: [0, Math.PI / 2.85, 0], scale: 0.72 },
+    { position: [2.58, 0, 1.78], rotation: [0, -Math.PI / 2.85, 0], scale: 0.72 },
+  ],
+  7: [
+    { position: [0, 0, 1.55], rotation: [0, 0, 0], scale: 0.96 },
+    { position: [-1.18, 0, -0.55], rotation: [0, 0.03, 0], scale: 0.82 },
+    { position: [1.18, 0, -0.55], rotation: [0, -0.03, 0], scale: 0.82 },
+    { position: [-2.12, 0, 0.35], rotation: [0, Math.PI / 2.95, 0], scale: 0.78 },
+    { position: [2.12, 0, 0.35], rotation: [0, -Math.PI / 2.95, 0], scale: 0.78 },
+    { position: [-2.58, 0, 1.78], rotation: [0, Math.PI / 2.85, 0], scale: 0.72 },
+    { position: [2.58, 0, 1.78], rotation: [0, -Math.PI / 2.85, 0], scale: 0.72 },
+  ],
+};
 
-    return {
-      photoId: photo.id,
-      position: [
-        layout.position[0],
-        layout.position[1],
-        layout.position[2] - row * 1.8,
-      ],
-      rotation: layout.rotation,
-      scale: layout.scale,
-    };
-  });
+const createPlacements = (photos) => {
+  const visiblePhotos = photos.slice(0, MAX_PHOTOS_PER_FLOOR);
+  const layout = mirroredLayouts[visiblePhotos.length] ?? mirroredLayouts[7];
+
+  return visiblePhotos.map((photo, index) => ({
+    photoId: photo.id,
+    position: layout[index].position,
+    rotation: layout[index].rotation,
+    scale: layout[index].scale,
+  }));
+};
 
 const drawingPhotos = getPhotosByCollection("drawings");
 const naturePhotos = getPhotosByCollection("nature");
@@ -44,7 +73,7 @@ export const homeFloors = [
     description: "A first pass through drawings, nature, and travel studies.",
     accent: "#f2b263",
     route: "/drawings",
-    photos: featuredPhotos.slice(0, 9),
+    photos: featuredPhotos.slice(0, MAX_PHOTOS_PER_FLOOR),
   },
   {
     id: "drawings",
@@ -76,5 +105,6 @@ export const homeFloors = [
 ].map((floor, index) => ({
   ...floor,
   index,
+  photos: floor.photos.slice(0, MAX_PHOTOS_PER_FLOOR),
   placements: createPlacements(floor.photos),
 }));

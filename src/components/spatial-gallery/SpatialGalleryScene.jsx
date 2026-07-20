@@ -12,29 +12,11 @@ import PhotoPanel from "./PhotoPanel";
 const FLOOR_HEIGHT = 6.7;
 
 function ElevatorShell() {
-  return (
-    <group>
-      {/* Fixed glass planes sell the feeling that the visitor is in one place
-          while the artwork levels glide past. They use basic transparent
-          materials so they are cheap and do not add more light/shadow textures. */}
-      <mesh position={[-3.65, 1.25, 2.05]} rotation={[0, 0.18, 0]}>
-        <planeGeometry args={[0.05, 5.2]} />
-        <meshBasicMaterial color="#cde0ff" transparent opacity={0.18} />
-      </mesh>
-      <mesh position={[3.65, 1.25, 2.05]} rotation={[0, -0.18, 0]}>
-        <planeGeometry args={[0.05, 5.2]} />
-        <meshBasicMaterial color="#cde0ff" transparent opacity={0.18} />
-      </mesh>
-      <mesh position={[0, 3.92, 1.85]}>
-        <boxGeometry args={[7.4, 0.025, 0.04]} />
-        <meshBasicMaterial color="#dbe8ff" transparent opacity={0.28} />
-      </mesh>
-      <mesh position={[0, -0.97, 1.85]}>
-        <boxGeometry args={[7.4, 0.025, 0.04]} />
-        <meshBasicMaterial color="#dbe8ff" transparent opacity={0.22} />
-      </mesh>
-    </group>
-  );
+  // The first elevator pass had literal glass rails. They helped describe the
+  // idea, but in screenshots they read as hard gray borders around the art and
+  // the reflector. Keep this component as a named placeholder for future subtle
+  // glass effects, but render nothing for now.
+  return null;
 }
 
 function GalleryFloor({ floor, activeFloorIndex, onSelect, selectedPhotoId }) {
@@ -43,10 +25,10 @@ function GalleryFloor({ floor, activeFloorIndex, onSelect, selectedPhotoId }) {
 
   return (
     <group position={[0, -floor.index * FLOOR_HEIGHT - 0.5, 0]}>
-      <mesh position={[0, 1.2, -3.15]}>
-        <planeGeometry args={[8.8, 5.9]} />
+      <mesh position={[0, 1.2, -3.45]}>
+        <planeGeometry args={[44, 18]} />
         <meshStandardMaterial
-          color={floor.index === activeFloorIndex ? "#050506" : "#020202"}
+          color={floor.index === activeFloorIndex ? "#030304" : "#010101"}
           roughness={1}
           metalness={0}
         />

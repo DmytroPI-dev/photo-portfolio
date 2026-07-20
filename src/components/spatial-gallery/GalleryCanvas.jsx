@@ -7,6 +7,7 @@ import SpatialGalleryScene from "./SpatialGalleryScene";
 export default function GalleryCanvas() {
   const [selectedPhotoId, setSelectedPhotoId] = useState(null);
   const [activeFloorIndex, setActiveFloorIndex] = useState(0);
+  const galleryRef = useRef(null);
   const lastFloorMoveAt = useRef(0);
   const touchStartY = useRef(null);
 
@@ -45,10 +46,12 @@ export default function GalleryCanvas() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [moveFloor]);
 
-  const handleWheel = (event) => {
+  const handleWheel = useCallback((event) => {
     // Trackpads emit many tiny wheel events. This throttle turns the stream into
     // one intentional floor change, which makes the gallery feel like an
-    // elevator stopping at a level instead of a web page sliding by.
+    // elevator stopping at a level instead of a web page sliding by. It is bound
+    // as a native non-passive listener below because React/browser passive wheel
+    // handling can reject preventDefault and spam the console.
     if (Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
     event.preventDefault();
 
@@ -59,7 +62,18 @@ export default function GalleryCanvas() {
 
     lastFloorMoveAt.current = now;
     moveFloor(event.deltaY > 0 ? 1 : -1);
-  };
+  }, [moveFloor]);
+
+  useEffect(() => {
+    const galleryElement = galleryRef.current;
+    if (!galleryElement) return undefined;
+
+    galleryElement.addEventListener("wheel", handleWheel, { passive: false });
+
+    return () => {
+      galleryElement.removeEventListener("wheel", handleWheel);
+    };
+  }, [handleWheel]);
 
   const handleTouchStart = (event) => {
     touchStartY.current = event.touches[0]?.clientY ?? null;
@@ -84,7 +98,7 @@ export default function GalleryCanvas() {
       bg="black"
       position="relative"
       className="home-elevator-gallery"
-      onWheel={handleWheel}
+      ref={galleryRef}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
       sx={{ touchAction: "pan-y" }}
