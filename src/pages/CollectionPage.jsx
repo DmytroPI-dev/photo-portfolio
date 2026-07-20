@@ -7,6 +7,7 @@ import {
 } from "@chakra-ui/react";
 import ContactSheetGallery from "../components/gallery/ContactSheetGallery";
 import DrawingRoomGallery from "../components/drawing-room/DrawingRoomGallery";
+import NatureGallery from "../components/nature-room/NatureGallery";
 import { Navigate, useParams } from "react-router-dom";
 import { getCollectionById } from "../data/collections";
 import { getPhotosByCollection } from "../data/photos";
@@ -21,11 +22,15 @@ export default function CollectionPage() {
 
   const photos = getPhotosByCollection(collection.id);
 
-  // Drawings currently gets the experimental Cynthia-style 3D room. Other
-  // collections stay on the stable 2D contact sheet until they receive their
-  // own visual treatment.
+  // Drawings and Nature now have collection-specific WebGL rooms. Travel stays
+  // on the stable 2D contact sheet until it gets its own documentary/memory-wall
+  // treatment.
   if (collection.id === "drawings") {
     return <DrawingRoomGallery collection={collection} photos={photos} />;
+  }
+
+  if (collection.id === "nature") {
+    return <NatureGallery collection={collection} photos={photos} />;
   }
 
   return (

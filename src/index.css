@@ -21,14 +21,17 @@ code {
     monospace;
 }
 
-.drawing-room-gallery canvas + div {
+.drawing-room-gallery canvas + div,
+.nature-gallery canvas + div {
   /* Drei's ScrollControls inserts this div next to the canvas. Keep its native
      scroll behavior for wheel/touch, but hide browser scrollbar chrome so the
-     Drawings page reads as a gallery room instead of a webpage scroller. */
+     immersive collection pages read as gallery rooms instead of webpage
+     scrollers. */
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 
-.drawing-room-gallery canvas + div::-webkit-scrollbar {
+.drawing-room-gallery canvas + div::-webkit-scrollbar,
+.nature-gallery canvas + div::-webkit-scrollbar {
   display: none;
 }
