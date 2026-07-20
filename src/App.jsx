@@ -15,7 +15,11 @@ import NotFoundPage from "./pages/NotFoundPage";
 
 function AppShell() {
   const { pathname } = useLocation();
-  const isImmersiveRoute = pathname === "/drawings";
+
+  // Home and Drawings use the mouse wheel as part of the WebGL experience. On
+  // those routes the footer would add normal page scrolling, so keep the viewport
+  // dedicated to the gallery; standard content pages still get the footer.
+  const isImmersiveRoute = pathname === "/" || pathname === "/drawings";
 
   return (
     <Box minH="100vh" bg="black">

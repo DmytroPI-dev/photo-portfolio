@@ -18,7 +18,7 @@ import image16 from "../images/16.JPG";
 export const photos = [
   {
     id: "drawing-01",
-    title: "Drawing Study 01",
+    title: "Stillness",
     description: "Placeholder for the first hand-drawing work.",
     src: image01,
     collectionId: "drawings",
@@ -31,7 +31,7 @@ export const photos = [
   },
   {
     id: "drawing-02",
-    title: "Drawing Study 02",
+    title: "Beautiful Beast",
     description: "Placeholder for a drawing detail or sketch.",
     src: image02,
     collectionId: "drawings",
@@ -44,7 +44,7 @@ export const photos = [
   },
   {
     id: "drawing-03",
-    title: "Drawing Study 03",
+    title: "Morning Path",
     description: "Placeholder for a drawing series piece.",
     src: image03,
     collectionId: "drawings",
@@ -57,7 +57,7 @@ export const photos = [
   },
   {
     id: "drawing-04",
-    title: "Drawing Study 04",
+    title: "Quiet Window",
     description: "Placeholder for a hand-drawn composition.",
     src: image04,
     collectionId: "drawings",
@@ -70,7 +70,7 @@ export const photos = [
   },
   {
     id: "drawing-05",
-    title: "Drawing Study 05",
+    title: "Small Ceremony",
     description: "Placeholder for a drawing close-up.",
     src: image05,
     collectionId: "drawings",
@@ -83,7 +83,7 @@ export const photos = [
   },
   {
     id: "drawing-06",
-    title: "Drawing Study 06",
+    title: "Gentle Line",
     description: "Placeholder for a final drawing in the first room.",
     src: image06,
     collectionId: "drawings",
