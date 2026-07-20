@@ -22,6 +22,9 @@ code {
 }
 
 .drawing-room-gallery canvas + div {
+  /* Drei's ScrollControls inserts this div next to the canvas. Keep its native
+     scroll behavior for wheel/touch, but hide browser scrollbar chrome so the
+     Drawings page reads as a gallery room instead of a webpage scroller. */
   scrollbar-width: none;
   -ms-overflow-style: none;
 }

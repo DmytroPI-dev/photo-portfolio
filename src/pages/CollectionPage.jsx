@@ -21,6 +21,9 @@ export default function CollectionPage() {
 
   const photos = getPhotosByCollection(collection.id);
 
+  // Drawings currently gets the experimental Cynthia-style 3D room. Other
+  // collections stay on the stable 2D contact sheet until they receive their
+  // own visual treatment.
   if (collection.id === "drawings") {
     return <DrawingRoomGallery collection={collection} photos={photos} />;
   }

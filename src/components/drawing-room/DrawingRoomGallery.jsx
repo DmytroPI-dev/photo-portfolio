@@ -6,6 +6,10 @@ import DrawingRoomScene from "./DrawingRoomScene";
 
 export default function DrawingRoomGallery({ collection, photos }) {
   const [activePhotoId, setActivePhotoId] = useState(photos[0]?.id ?? null);
+
+  // The 3D scene owns the scroll interaction, but the page-level overlay needs
+  // the currently centered photo for the title/description. The scene reports
+  // that id upward through `setActivePhotoId`.
   const activePhoto = useMemo(
     () => photos.find((photo) => photo.id === activePhotoId) ?? photos[0],
     [activePhotoId, photos]
@@ -22,12 +26,18 @@ export default function DrawingRoomGallery({ collection, photos }) {
       color="white"
     >
       <Canvas
-        shadows
+        // Shadows are intentionally disabled for this room. Circular scroll
+        // renders three copies of the rail; if every duplicated spotlight casts
+        // shadows, older Mac GPUs can exceed MAX_TEXTURE_IMAGE_UNITS and lose
+        // the WebGL context.
         dpr={[1, 1.5]}
         camera={{ position: [0, 0.05, 6.8], fov: 52 }}
         gl={{ antialias: true, alpha: false }}
       >
         <ScrollControls
+          // Drei handles the native wheel/touch scroll container. `infinite`
+          // keeps the scroll position wrapping; the scene duplicates the rail
+          // so the visual loop does not expose an empty gap.
           infinite
           horizontal
           pages={Math.max(photos.length + 1, 2)}
@@ -53,6 +63,9 @@ export default function DrawingRoomGallery({ collection, photos }) {
         position="absolute"
         inset={0}
         pointerEvents="none"
+        // CSS vignette replaces heavier postprocessing for now. It is cheap on
+        // mobile and avoids another WebGL pass while still giving the dark-room
+        // edges from the reference gallery.
         bg="radial-gradient(circle at 50% 44%, transparent 0%, transparent 48%, rgba(0,0,0,0.24) 74%, rgba(0,0,0,0.58) 100%)"
       />
 
@@ -103,6 +116,9 @@ export default function DrawingRoomGallery({ collection, photos }) {
       >
         <Box
           h="1px"
+          // This is a simple collection progress indicator, not the physical
+          // scroll percentage. With circular scroll it jumps from full back to
+          // the first image, matching the active artwork id.
           w={`${photos.length ? ((photos.findIndex((photo) => photo.id === activePhotoId) + 1) / photos.length) * 100 : 0}%`}
           bg="#f2d6a2"
           transition="width 180ms ease"

@@ -9,7 +9,7 @@ import {
 import { Link as RouterLink } from "react-router-dom";
 import ContactSheetGallery from "../components/gallery/ContactSheetGallery";
 import GalleryCanvas from "../components/spatial-gallery/GalleryCanvas";
-import { featuredPhotos } from "../data/photos";
+import { homeFloors } from "../data/homeFloors";
 
 export default function HomePage() {
   return (
@@ -64,10 +64,10 @@ export default function HomePage() {
               lineHeight="1"
               letterSpacing="0"
             >
-              Drawings, nature, and travel in a cinematic dark room.
+              A vertical gallery of drawings, nature, and travel studies.
             </Heading>
             <Text color="whiteAlpha.800" fontSize={{ base: "md", md: "md" }}>
-              Drawings first, then quiet nature and travel studies.
+              Hand-drawn pieces first, then quiet outdoor scenes and places in motion.
             </Text>
           </Stack>
 
@@ -94,7 +94,30 @@ export default function HomePage() {
           pb={10}
           bg={useColorModeValue("gray.900", "black")}
         >
-          <ContactSheetGallery photos={featuredPhotos.slice(0, 6)} />
+          {/* Mobile keeps the same story as the 3D Home scene, but presents each
+              floor as a normal responsive image section so phones and tablets do
+              not pay the cost of the desktop WebGL elevator. */}
+          <Stack spacing={12}>
+            {homeFloors.map((floor) => (
+              <Box key={floor.id}>
+                <Stack spacing={2} mb={5}>
+                  <Text
+                    textTransform="uppercase"
+                    fontSize="xs"
+                    letterSpacing="0.14em"
+                    color="whiteAlpha.600"
+                  >
+                    {floor.label}
+                  </Text>
+                  <Heading as="h2" size="lg" color="white">
+                    {floor.title}
+                  </Heading>
+                  <Text color="whiteAlpha.700">{floor.description}</Text>
+                </Stack>
+                <ContactSheetGallery photos={floor.photos.slice(0, 6)} />
+              </Box>
+            ))}
+          </Stack>
         </Box>
       </Box>
     </Box>
