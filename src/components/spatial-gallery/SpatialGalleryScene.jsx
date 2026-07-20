@@ -24,7 +24,7 @@ function GalleryFloor({ floor, activeFloorIndex, onSelect, selectedPhotoId }) {
   const floorFocus = distanceFromActive === 0 ? 1 : 0.28;
 
   return (
-    <group position={[0, -floor.index * FLOOR_HEIGHT - 0.5, 0]}>
+    <group position={[0, -floor.index * FLOOR_HEIGHT - 0.85, 0.2]}>
       <mesh position={[0, 1.2, -3.45]}>
         <planeGeometry args={[44, 18]} />
         <meshStandardMaterial
@@ -138,16 +138,16 @@ export default function SpatialGalleryScene({
       <mesh position={[0, -1.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[50, 50]} />
         <MeshReflectorMaterial
-          blur={[300, 100]}
+          blur={[450, 160]}
           resolution={1024}
-          mixBlur={1}
-          mixStrength={42}
+          mixBlur={1.5}
+          mixStrength={28}
           roughness={1}
-          depthScale={0.7}
+          depthScale={0.5}
           minDepthThreshold={0.35}
           maxDepthThreshold={1.25}
-          color="#050505"
-          metalness={0.42}
+          color="#0d0e0d"
+          metalness={0.55}
         />
       </mesh>
 
