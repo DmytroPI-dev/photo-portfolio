@@ -18,7 +18,6 @@ import {
   InputGroup,
   InputLeftElement,
   Textarea,
-  useColorModeValue,
 } from "@chakra-ui/react";
 import { BsGithub, BsLinkedin, BsPerson } from "react-icons/bs";
 import {
@@ -36,7 +35,7 @@ const ContactButton = ({ icon, label, href }) => (
   <Button
     size="lg"
     variant="ghost"
-    color={useColorModeValue("gray.800", "white")}
+    color="white"
     _hover={{ border: "2px solid #1C6FEB" }}
     leftIcon={icon}
   >
@@ -61,7 +60,7 @@ export default function Contacts() {
   
   return (
     <Container
-      bg={useColorModeValue("gray.100", "gray.900")}
+      bg="gray.900"
       maxW="full"
       mt={0}
       centerContent
@@ -69,7 +68,7 @@ export default function Contacts() {
     >
       <Flex>
         <Box
-          bg={useColorModeValue("white", "gray.800")}
+          bg="gray.800"
           boxShadow={"lg"}
           rounded={"xl"}
           color="white"
@@ -81,12 +80,12 @@ export default function Contacts() {
             <Wrap spacing={{ base: 20, sm: 3, md: 5, lg: 20 }}>
               <WrapItem>
                 <Box>
-                  <Heading color={useColorModeValue("gray.800", "white")}>
+                  <Heading color="white">
                     Contact
                   </Heading>
                   <Text
                     mt={{ sm: 3, md: 3, lg: 5 }}
-                    color={useColorModeValue("gray.800", "white")}
+                    color="white"
                   >
                     Fill up the form below to contact me
                   </Text>
@@ -105,7 +104,7 @@ export default function Contacts() {
                       <Button
                         size="lg"
                         variant="ghost"
-                        color={useColorModeValue("gray.800", "white")}
+                        color="white"
                         _hover={{ border: "2px solid #1C6FEB" }}
                         leftIcon={<MdLocationOn color="#1970F1" size="20px" />}
                       >
@@ -125,10 +124,10 @@ export default function Contacts() {
               </WrapItem>
               <WrapItem>
                 <Box
-                  bg={useColorModeValue("white", "gray.800")}
+                  bg="gray.800"
                   borderRadius="lg"
                 >
-                  <Box m={8} color={useColorModeValue("gray.800", "white")}>
+                  <Box m={8} color="white">
                     <VStack spacing={5}>
                       <FormControl id="name">
                         <FormLabel>Your Name</FormLabel>
@@ -162,7 +161,7 @@ export default function Contacts() {
                         <Button
                           variant="solid"
                           bg="#0D74FF"
-                          color={useColorModeValue("gray.800", "white")}
+                          color="white"
                           _hover={{
                             bg: "cyan.400",
                           }}

@@ -7,7 +7,6 @@ import {
   Image,
   Stack,
   Text,
-  useColorModeValue,
 } from "@chakra-ui/react";
 import { photos } from "../data/photos";
 
@@ -17,7 +16,7 @@ export default function AboutPage() {
   return (
     <Box
       minH="100vh"
-      bg={useColorModeValue("gray.900", "black")}
+      bg="black"
       color="white"
       px={{ base: 5, md: 10, xl: 16 }}
       py={{ base: 10, md: 16 }}

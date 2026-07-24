@@ -4,7 +4,6 @@ import {
   Heading,
   Stack,
   Text,
-  useColorModeValue,
 } from "@chakra-ui/react";
 import { Link as RouterLink } from "react-router-dom";
 import ContactSheetGallery from "../components/gallery/ContactSheetGallery";
@@ -16,7 +15,7 @@ export default function HomePage() {
     <Box>
       <Box
         minH={{ base: "auto", md: "100vh" }}
-        bg={useColorModeValue("gray.900", "black")}
+        bg="black"
         color="white"
         position="relative"
       >
@@ -92,7 +91,7 @@ export default function HomePage() {
           display={{ base: "block", md: "none" }}
           px={5}
           pb={10}
-          bg={useColorModeValue("gray.900", "black")}
+          bg="black"
         >
           {/* Mobile keeps the same story as the 3D Home scene, but presents each
               floor as a normal responsive image section so phones and tablets do
