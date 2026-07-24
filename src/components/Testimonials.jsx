@@ -7,7 +7,6 @@ import {
   Stack,
   Container,
   Avatar,
-  useColorModeValue,
 } from '@chakra-ui/react';
 
 const Testimonial = (props) => {
@@ -21,7 +20,7 @@ const TestimonialContent = (props) => {
 
   return (
     <Stack
-      bg={useColorModeValue('white', 'gray.800')}
+      bg="gray.800"
       boxShadow={'lg'}
       p={8}
       rounded={'xl'}
@@ -37,7 +36,7 @@ const TestimonialContent = (props) => {
         borderRightWidth: 16,
         borderTop: 'solid',
         borderTopWidth: 16,
-        borderTopColor: useColorModeValue('white', 'gray.800'),
+        borderTopColor: 'gray.800',
         pos: 'absolute',
         bottom: '-16px',
         left: '50%',
@@ -65,7 +64,7 @@ const TestimonialText = (props) => {
   return (
     <Text
       textAlign={'center'}
-      color={useColorModeValue('gray.600', 'gray.400')}
+      color="gray.400"
       fontSize={'sm'}
     >
       {children}
@@ -79,7 +78,7 @@ const TestimonialAvatar = ({ src, name, title }) => {
       <Avatar src={src} mb={2} />
       <Stack spacing={-1} align={'center'}>
         <Text fontWeight={600}>{name}</Text>
-        <Text fontSize={'sm'} color={useColorModeValue('gray.600', 'gray.400')}>
+        <Text fontSize={'sm'} color="gray.400">
           {title}
         </Text>
       </Stack>
@@ -89,7 +88,7 @@ const TestimonialAvatar = ({ src, name, title }) => {
 
 export default function WithSpeechBubbles() {
   return (
-    <Box bg={useColorModeValue("gray.100", "gray.900")}>
+    <Box bg="gray.900">
       <Container maxW={'7xl'} py={16} as={Stack} spacing={12}>
         <Stack spacing={0} align={'center'}>
           <Heading>Our Clients Speak</Heading>

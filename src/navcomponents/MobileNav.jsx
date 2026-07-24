@@ -1,4 +1,4 @@
-import { Flex, IconButton, Text, useColorModeValue } from "@chakra-ui/react";
+import { Flex, IconButton, Text } from "@chakra-ui/react";
 import { FiMenu } from "react-icons/fi";
 
 export default function MobileNav({ onOpen, ...rest }) {
@@ -8,11 +8,11 @@ export default function MobileNav({ onOpen, ...rest }) {
         px={{ base: 4, md: 24 }}
         height="20"
         alignItems="center"
-        bg={useColorModeValue("white", "black")}
+        bg="black"
         borderBottomWidth="1px"
-        borderBottomColor={useColorModeValue("gray.200", "whiteAlpha.200")}
+        borderBottomColor="whiteAlpha.200"
         justifyContent="flex-start"
-        color={useColorModeValue("gray.900", "white")}
+        color="white"
         position="fixed"
         top={0}
         left={0}

@@ -1,6 +1,6 @@
 // Import Swiper React components
 import { Swiper, SwiperSlide } from "swiper/react";
-import { Box, useColorModeValue } from "@chakra-ui/react";
+import { Box } from "@chakra-ui/react";
 import { featuredPhotos } from "../data/photos";
 import "swiper/css/effect-coverflow";
 import "swiper/css/pagination";
@@ -18,7 +18,7 @@ import {
 
 export default function Carousel() {
   return (
-    <Box mt={4} mx="auto" bg={useColorModeValue("gray.100", "gray.900")}>
+    <Box mt={4} mx="auto" bg="gray.900">
       {/* Add margin-top and control the width */}
       <Swiper
         effect={"coverflow"}

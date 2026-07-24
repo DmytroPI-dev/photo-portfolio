@@ -3,7 +3,6 @@ import {
   Heading,
   Stack,
   Text,
-  useColorModeValue,
 } from "@chakra-ui/react";
 import ContactSheetGallery from "../components/gallery/ContactSheetGallery";
 import DrawingRoomGallery from "../components/drawing-room/DrawingRoomGallery";
@@ -36,7 +35,7 @@ export default function CollectionPage() {
   return (
     <Box
       minH="100vh"
-      bg={useColorModeValue("gray.900", "black")}
+      bg="black"
       color="white"
       px={{ base: 5, md: 10, xl: 16 }}
       py={{ base: 10, md: 16 }}

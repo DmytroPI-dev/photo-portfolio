@@ -1,14 +1,10 @@
 import NavItem from "./NavItem";
 import {
   Box,
-  Button,
   Flex,
   Text,
   CloseButton,
-  useColorMode,
-  useColorModeValue,
 } from "@chakra-ui/react";
-import { MoonIcon, SunIcon } from "@chakra-ui/icons";
 
 import {
   FiAperture,
@@ -29,16 +25,15 @@ const LinkItems = [
 ];
 
 export default function SideBarContent({ onClose, ...rest }) {
-  const { colorMode, toggleColorMode } = useColorMode();
   return (
     <Box
-      bg={useColorModeValue("white", "black")}
+      bg="black"
       borderRight="1px"
-      borderRightColor={useColorModeValue("gray.200", "whiteAlpha.200")}
+      borderRightColor="whiteAlpha.200"
       w={{ base: "full", md: 60 }}
       pos="fixed"
       h="full"
-      color={useColorModeValue("gray.900", "white")}
+      color="white"
       {...rest}
     >
       <Flex h="20" alignItems="center" mx="8" justifyContent="space-between">
@@ -57,24 +52,6 @@ export default function SideBarContent({ onClose, ...rest }) {
           {link.name}
         </NavItem>
       ))}
-      
-      {/* Color Mode Toggle Button */}
-      <Button
-        fontSize="16"
-        variant="ghost"
-        color={useColorModeValue("gray.600", "gray.300")}
-        leftIcon={colorMode === "light" ? <MoonIcon /> : <SunIcon />}
-        onClick={toggleColorMode}
-        justifyContent="space-between"
-        alignItems="center"
-        p="4"
-        mx="4"
-        _hover={{
-          bg: useColorModeValue("gray.100", "whiteAlpha.200"),
-        }}
-      >
-        {colorMode === "light" ? "Dark Mode" : "Light Mode"}
-      </Button>
     </Box>
   );
 }
