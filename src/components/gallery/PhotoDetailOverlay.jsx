@@ -94,7 +94,12 @@ export default function PhotoDetailOverlay({
                   >
                     Selected Work
                   </Text>
-                  <Heading as="h2" fontSize={{ base: "2xl", md: "3xl" }}>
+                  <Heading
+                    as="h2"
+                    fontFamily="Sacramento, cursive"
+                    fontSize={{ base: "4xl", md: "5xl" }}
+                    fontWeight="400"
+                  >
                     {photo.title}
                   </Heading>
                   {photo.description && (

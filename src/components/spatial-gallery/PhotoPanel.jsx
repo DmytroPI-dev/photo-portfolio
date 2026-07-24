@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
 const GOLDEN_RATIO = 1.61803398875;
+const ARTWORK_FONT = "/fonts/sacramento.woff";
 
 export default function PhotoPanel({
   photo,
@@ -122,6 +123,8 @@ export default function PhotoPanel({
       </mesh>
       <Text
         position={[0.55, GOLDEN_RATIO, 0]}
+        // Canvas text needs its own font URL; it does not inherit page CSS.
+        font={ARTWORK_FONT}
         fontSize={0.025}
         color={isDimmed ? "#777777" : "#f4eadc"}
         anchorX="left"

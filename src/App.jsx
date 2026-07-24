@@ -16,12 +16,10 @@ import NotFoundPage from "./pages/NotFoundPage";
 function AppShell() {
   const { pathname } = useLocation();
 
-  // Home, Drawings, and Nature use the mouse wheel as part of the WebGL
-  // experience. On those routes the footer would add normal page scrolling, so
-  // keep the viewport dedicated to the gallery; standard content pages still get
-  // the footer.
-  const isImmersiveRoute =
-    pathname === "/" || pathname === "/drawings" || pathname === "/nature";
+  // Only standard content routes use the footer. Gallery rooms and the 404
+  // scene occupy the viewport, including unknown collection URLs that resolve
+  // to NotFoundPage inside CollectionPage.
+  const hasFooter = ["/travel", "/about", "/contact"].includes(pathname);
 
   return (
     <Box minH="100vh" bg="black">
@@ -34,7 +32,7 @@ function AppShell() {
           <Route path="/contact" element={<ContactPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
-        {!isImmersiveRoute ? <Footer /> : null}
+        {hasFooter ? <Footer /> : null}
       </Box>
     </Box>
   );

@@ -53,7 +53,12 @@ export default function PhotoCard({ photo, onSelect }) {
         />
       </AspectRatio>
       <Stack spacing={1} p={{ base: 4, md: 5 }}>
-        <Heading as="h2" fontSize={{ base: "md", md: "lg" }}>
+        <Heading
+          as="h2"
+          fontFamily="Sacramento, cursive"
+          fontSize={{ base: "xl", md: "2xl" }}
+          fontWeight="400"
+        >
           {photo.title}
         </Heading>
         {photo.description && (

@@ -182,6 +182,7 @@ export default function NatureGallery({ collection, photos }) {
           </Text>
           <Heading
             as="h1"
+            fontFamily="Sacramento, cursive"
             fontWeight="500"
             fontSize={{ md: "4xl", xl: "5xl" }}
             lineHeight="1"
