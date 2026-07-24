@@ -1,3 +1,11 @@
+/* The drawing room already loads this file directly for its 3D plaques. CSS
+   registration makes the same local font available to HTML artwork titles. */
+@font-face {
+  font-family: "Sacramento";
+  src: url("/fonts/sacramento.woff") format("woff");
+  font-display: swap;
+}
+
 html,
 body,
 #root {

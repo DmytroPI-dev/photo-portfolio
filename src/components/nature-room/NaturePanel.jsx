@@ -12,6 +12,7 @@ const MAT_BORDER = 0.22;
 const SHADOW_OPACITY = 0.9;
 const EXPANDED_SHADOW_OPACITY = 1;
 const SHADOW_COLOR = "#000000";
+const ARTWORK_FONT = "/fonts/sacramento.woff";
 
 function createShadowTexture() {
   const canvas = document.createElement("canvas");
@@ -263,6 +264,9 @@ export default function NaturePanel({
       <Text
         ref={title}
         position={[0, -frameHeight / 2 - 0.26, 0.08]}
+        // Drei text is rendered inside WebGL, so it needs the font file URL;
+        // the CSS @font-face declaration cannot reach this canvas label.
+        font={ARTWORK_FONT}
         fontSize={0.105}
         color="#f5ebd9"
         anchorX="center"

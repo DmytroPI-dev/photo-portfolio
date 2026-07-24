@@ -87,6 +87,7 @@ export default function DrawingRoomGallery({ collection, photos }) {
         <Heading
           as="h1"
           mt={2}
+          fontFamily="Sacramento, cursive"
           fontWeight="500"
           fontSize={{ base: "2xl", md: "4xl" }}
           lineHeight="1.02"

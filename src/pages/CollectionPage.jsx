@@ -7,7 +7,8 @@ import {
 import ContactSheetGallery from "../components/gallery/ContactSheetGallery";
 import DrawingRoomGallery from "../components/drawing-room/DrawingRoomGallery";
 import NatureGallery from "../components/nature-room/NatureGallery";
-import { Navigate, useParams } from "react-router-dom";
+import NotFoundPage from "./NotFoundPage";
+import { useParams } from "react-router-dom";
 import { getCollectionById } from "../data/collections";
 import { getPhotosByCollection } from "../data/photos";
 
@@ -16,7 +17,10 @@ export default function CollectionPage() {
   const collection = getCollectionById(collectionId);
 
   if (!collection) {
-    return <Navigate to="/" replace />;
+    // `/:collectionId` also matches unknown one-segment URLs. Render the 404
+    // page here instead of redirecting, so the address bar keeps the URL the
+    // visitor attempted to open.
+    return <NotFoundPage />;
   }
 
   const photos = getPhotosByCollection(collection.id);
