@@ -1,39 +1,97 @@
-import { Text, useScroll } from "@react-three/drei";
-import { useFrame, useLoader } from "@react-three/fiber";
-import { useEffect, useMemo, useRef } from "react";
+import { Text, useCursor } from "@react-three/drei";
+import { useFrame, useLoader, useThree } from "@react-three/fiber";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
-const MAX_PANEL_WIDTH = 3.35;
-const MAX_PANEL_HEIGHT = 2.65;
-const normalizeOffset = (offset) => ((offset % 1) + 1) % 1;
+const MAX_PHOTO_WIDTH = 2.45;
+const MAX_PHOTO_HEIGHT = 3.15;
+const ENTER_OFFSET_X = 4.2;
+const MAT_BORDER = 0.22;
+// Keep the shadow strength in one place. Its material starts at this same
+// value, so it remains stable once the animation loop begins.
+const SHADOW_OPACITY = 0.9;
+const EXPANDED_SHADOW_OPACITY = 1;
+const SHADOW_COLOR = "#000000";
+
+function createShadowTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 512;
+
+  const context = canvas.getContext("2d");
+
+  // This texture acts like a CSS box-shadow, but lives inside WebGL so it can
+  // move, rotate, and fade with the framed photo. The hard center is hidden
+  // behind the actual frame; the useful part is the large blurred edge.
+  context.shadowColor = "rgba(0, 0, 0, 1)";;
+  context.shadowBlur = 92;
+  context.shadowOffsetX = 30;
+  context.shadowOffsetY = 42;
+  context.fillStyle = "rgba(0, 0, 0, 0.7)";
+  context.fillRect(116, 96, 280, 320);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function getFittedSize(photo) {
+  const aspect = photo?.width && photo?.height ? photo.width / photo.height : 0.75;
+  const photoWidth = Math.min(MAX_PHOTO_WIDTH, MAX_PHOTO_HEIGHT * aspect);
+  const photoHeight = photoWidth / aspect;
+
+  return {
+    photoWidth,
+    photoHeight,
+    frameWidth: photoWidth + MAT_BORDER * 2,
+    frameHeight: photoHeight + MAT_BORDER * 2,
+  };
+}
 
 export default function NaturePanel({
   photo,
-  index,
-  trackIndex = index,
-  spacing,
-  totalPhotos,
-  wallZ,
+  direction,
+  phase,
+  isExpanded,
+  onToggleExpanded,
 }) {
-  const scroll = useScroll();
+  const { pointer } = useThree();
   const group = useRef();
+  const frame = useRef();
+  const mat = useRef();
   const image = useRef();
-  const glass = useRef();
+  const shadow = useRef();
+  const title = useRef();
+  const [hovered, setHovered] = useState(false);
   const texture = useLoader(THREE.TextureLoader, photo.src);
-  const aspect = photo.width && photo.height ? photo.width / photo.height : 0.75;
+  const shadowTexture = useMemo(createShadowTexture, []);
+  const { photoWidth, photoHeight, frameWidth, frameHeight } = useMemo(
+    () => getFittedSize(photo),
+    [photo]
+  );
+  const initialTransform = useMemo(
+    () => {
+      // This is intentionally mount-only. The panel is keyed by `photo.id`, so a
+      // new image gets a fresh starting transform, while later phase changes do
+      // not snap the same group back to a prop-defined position.
+      if (phase !== "entering") {
+        return {
+          position: [0, -0.04, 0],
+          rotation: [0, 0, 0],
+          scale: 1,
+        };
+      }
 
-  // Fit both vertical placeholders and future landscape photos into a wider
-  // nature-gallery envelope. When real landscape images arrive, they will expand
-  // horizontally without changing this component.
-  const panelWidth = Math.min(MAX_PANEL_WIDTH, MAX_PANEL_HEIGHT * aspect);
-  const panelHeight = panelWidth / aspect;
-  const labelY = -panelHeight / 2 - 0.28;
+      return {
+        position: [direction * ENTER_OFFSET_X, -0.05, -0.35],
+        rotation: [0.08, direction * -0.28, direction * -0.1],
+        scale: 0.84,
+      };
+    },
+    []
+  );
 
-  const baseRotationY = useMemo(() => {
-    if (index % 3 === 1) return Math.PI / 18;
-    if (index % 3 === 2) return -Math.PI / 18;
-    return 0;
-  }, [index]);
+  useCursor(hovered);
 
   useEffect(() => {
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -41,85 +99,178 @@ export default function NaturePanel({
     texture.needsUpdate = true;
   }, [texture]);
 
-  useFrame((_, delta) => {
+  useEffect(() => () => shadowTexture.dispose(), [shadowTexture]);
+
+  useFrame((state, delta) => {
     if (!group.current) return;
 
-    const currentIndex = normalizeOffset(scroll.offset) * Math.max(totalPhotos, 1);
-    const distanceFromCenter = trackIndex - currentIndex;
-    const focus = Math.max(0, 1 - Math.abs(distanceFromCenter) * 0.42);
+    const leaving = phase === "leaving";
+    const expandedScale = isExpanded ? 1.44 : 1;
+    const floatY = Math.sin(state.clock.elapsedTime * 0.9) * 0.055;
+    const waveZ = Math.sin(state.clock.elapsedTime * 0.8 + pointer.x * 1.4) * 0.018;
 
-    group.current.rotation.y = THREE.MathUtils.damp(
-      group.current.rotation.y,
-      baseRotationY + THREE.MathUtils.clamp(distanceFromCenter * -0.035, -0.16, 0.16),
-      4,
+    const targetX = leaving ? -direction * ENTER_OFFSET_X : 0;
+    const targetY = (isExpanded ? 0.02 : -0.04) + floatY;
+    const targetZ = isExpanded ? 1.02 : 0;
+    const targetScale = (leaving ? 0.84 : expandedScale) * (hovered ? 1.025 : 1);
+    const targetRotationY = leaving
+      ? direction * 0.34
+      : pointer.x * (isExpanded ? 0.055 : 0.13);
+    const targetRotationX = pointer.y * (isExpanded ? -0.035 : -0.08);
+    const targetRotationZ = leaving
+      ? direction * -0.14
+      : waveZ + pointer.x * (isExpanded ? -0.01 : -0.025);
+
+    group.current.position.x = THREE.MathUtils.damp(
+      group.current.position.x,
+      targetX,
+      3.8,
+      delta
+    );
+    group.current.position.y = THREE.MathUtils.damp(
+      group.current.position.y,
+      targetY,
+      3.2,
       delta
     );
     group.current.position.z = THREE.MathUtils.damp(
       group.current.position.z,
-      focus * 0.16,
-      3,
+      targetZ,
+      3.2,
       delta
     );
     group.current.scale.setScalar(
-      THREE.MathUtils.damp(group.current.scale.x, 0.96 + focus * 0.055, 4, delta)
+      THREE.MathUtils.damp(group.current.scale.x, targetScale, 3.4, delta)
+    );
+    group.current.rotation.x = THREE.MathUtils.damp(
+      group.current.rotation.x,
+      targetRotationX,
+      3.2,
+      delta
+    );
+    group.current.rotation.y = THREE.MathUtils.damp(
+      group.current.rotation.y,
+      targetRotationY,
+      3.2,
+      delta
+    );
+    group.current.rotation.z = THREE.MathUtils.damp(
+      group.current.rotation.z,
+      targetRotationZ,
+      3.2,
+      delta
     );
 
-    if (image.current) {
-      image.current.material.emissiveIntensity = THREE.MathUtils.damp(
-        image.current.material.emissiveIntensity,
-        0.02 + focus * 0.06,
-        4,
+    const targetOpacity = leaving ? 0 : 1;
+    [frame, mat, image, title].forEach((item) => {
+      if (!item.current?.material) return;
+      item.current.material.opacity = THREE.MathUtils.damp(
+        item.current.material.opacity,
+        targetOpacity,
+        4.4,
+        delta
+      );
+    });
+
+    if (shadow.current) {
+      shadow.current.material.opacity = THREE.MathUtils.damp(
+        shadow.current.material.opacity,
+        leaving ? 0 : isExpanded ? EXPANDED_SHADOW_OPACITY : SHADOW_OPACITY,
+        4.4,
         delta
       );
     }
 
-    if (glass.current) {
-      glass.current.material.opacity = THREE.MathUtils.damp(
-        glass.current.material.opacity,
-        0.12 + focus * 0.11,
-        4,
-        delta
+    if (frame.current) {
+      frame.current.material.color.lerp(
+        new THREE.Color(hovered || isExpanded ? "#d8c28f" : "#11100e"),
+        1 - Math.exp(-delta * 4)
       );
     }
   });
 
   return (
-    <group ref={group} position={[trackIndex * spacing, 0.48, 0]}>
-      <mesh position={[0, 0, wallZ + 0.02]}>
-        <boxGeometry args={[panelWidth + 0.28, panelHeight + 0.28, 0.06]} />
-        <meshStandardMaterial color="#0a0f0b" roughness={0.72} metalness={0.12} />
-      </mesh>
-
-      <mesh ref={image} position={[0, 0, wallZ + 0.08]}>
-        <boxGeometry args={[panelWidth, panelHeight, 0.035]} />
-        <meshStandardMaterial
-          map={texture}
-          roughness={0.52}
-          metalness={0}
-          emissive="#dceee0"
-          emissiveIntensity={0.04}
+    <group
+      ref={group}
+      position={initialTransform.position}
+      rotation={initialTransform.rotation}
+      scale={initialTransform.scale}
+      onClick={(event) => {
+        event.stopPropagation();
+        onToggleExpanded();
+      }}
+      onPointerOver={(event) => {
+        event.stopPropagation();
+        setHovered(true);
+      }}
+      onPointerOut={() => setHovered(false)}
+    >
+      {/*
+        The soft shadow is a transparent WebGL plane rather than a CSS
+        box-shadow. `renderOrder` and disabled depth testing make it paint
+        first; the frame then covers its rectangular center, leaving only the
+        blurred perimeter visible behind the artwork.
+      */}
+      <mesh
+        ref={shadow}
+        position={[0.24, -0.32, -0.18]}
+        renderOrder={-1}
+      >
+        <planeGeometry args={[frameWidth + 1.65, frameHeight + 1.75]} />
+        <meshBasicMaterial
+          map={shadowTexture}
+          color={SHADOW_COLOR}
+          transparent
+          opacity={SHADOW_OPACITY}
+          depthTest={false}
+          depthWrite={false}
+          toneMapped={false}
         />
       </mesh>
 
-      <mesh ref={glass} position={[0, 0, wallZ + 0.11]}>
-        <planeGeometry args={[panelWidth, panelHeight]} />
-        <meshBasicMaterial
-          color="#dcefe2"
+      <mesh ref={frame} position={[0, 0, -0.05]}>
+        <boxGeometry args={[frameWidth + 0.18, frameHeight + 0.18, 0.14]} />
+        <meshStandardMaterial
+          color="#11100e"
+          roughness={0.42}
+          metalness={0.54}
           transparent
-          opacity={0.16}
-          blending={THREE.MultiplyBlending}
-          depthWrite={false}
+          opacity={1}
+        />
+      </mesh>
+
+      <mesh ref={mat} position={[0, 0, 0.035]}>
+        <boxGeometry args={[frameWidth, frameHeight, 0.055]} />
+        <meshStandardMaterial
+          color="#3e4740"
+          roughness={0.92}
+          metalness={0}
+          transparent
+          opacity={1}
+        />
+      </mesh>
+
+      <mesh ref={image} position={[0, 0.1, 0.05]}>
+        <boxGeometry args={[photoWidth, photoHeight, 0.035]} />
+        <meshBasicMaterial
+          map={texture}
+          transparent
+          opacity={1}
+          toneMapped={false}
         />
       </mesh>
 
       <Text
-        position={[0, labelY, wallZ + 0.13]}
-        fontSize={0.08}
-        color="#c7d7c4"
+        ref={title}
+        position={[0, -frameHeight / 2 - 0.26, 0.08]}
+        fontSize={0.105}
+        color="#f5ebd9"
         anchorX="center"
         anchorY="top"
-        maxWidth={panelWidth}
+        maxWidth={frameWidth}
         textAlign="center"
+        material-transparent
+        material-opacity={1}
       >
         {photo.title}
       </Text>
