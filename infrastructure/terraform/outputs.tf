@@ -17,3 +17,8 @@ output "metadata_table_arn" {
   description = "DynamoDB table ARN for the upcoming repository and seed command."
   value       = aws_dynamodb_table.gallery_metadata.arn
 }
+
+output "cost_anomaly_monitor_arn" {
+  description = "External account-wide Cost Anomaly Detection service monitor ARN used by this project's alert subscription."
+  value       = var.service_anomaly_monitor_arn
+}

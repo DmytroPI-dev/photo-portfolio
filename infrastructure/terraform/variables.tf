@@ -55,3 +55,14 @@ variable "allowed_cors_origins" {
     "https://photo-gallery.i-dmytro.org",
   ]
 }
+
+variable "billing_alert_email" {
+  description = "Email address for AWS Budget and Cost Anomaly Detection alerts. Keep the value in ignored terraform.tfvars."
+  type        = string
+  sensitive   = true
+}
+
+variable "service_anomaly_monitor_arn" {
+  description = "Existing account-wide Cost Anomaly Detection SERVICE monitor ARN. Keep the account-specific value in ignored terraform.tfvars."
+  type        = string
+}
