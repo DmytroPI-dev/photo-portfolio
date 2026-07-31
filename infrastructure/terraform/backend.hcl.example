@@ -1,0 +1,7 @@
+# Copy this file to backend.hcl after applying ../terraform-state, then replace
+# the placeholders with `terraform output -raw backend_config_hcl`.
+bucket       = "photo-portfolio-prod-terraform-state-ACCOUNT_ID"
+key          = "photo-portfolio/prod/terraform.tfstate"
+region        = "eu-central-1"
+use_lockfile  = true
+encrypt       = true

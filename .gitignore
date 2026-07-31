@@ -25,3 +25,11 @@ yarn-error.log*
 # public/images/
 .codex/
 AGENTS.md
+
+# Gallery API build and Terraform working state
+/services/gallery-api/build/
+/infrastructure/terraform-state/.terraform/
+/infrastructure/terraform-state/*.tfplan
+/infrastructure/terraform/backend.hcl
+/infrastructure/terraform/.terraform/
+/infrastructure/terraform/*.tfplan

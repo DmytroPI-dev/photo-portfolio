@@ -8,19 +8,30 @@ import (
 
 	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/gallery"
 	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/httpapi"
+	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/lambdaadapter"
+	"github.com/aws/aws-lambda-go/lambda"
 )
 
 func main() {
+	handler := httpapi.NewHandler(gallery.NewSeedRepository())
+	if os.Getenv("AWS_LAMBDA_RUNTIME_API") != "" {
+		// provided.al2023 invokes the custom-runtime bootstrap binary through the
+		// Lambda Runtime API. The adapter preserves the local net/http handler so
+		// routing and JSON responses have one source of truth.
+		lambda.Start(lambdaadapter.New(handler))
+		return
+	}
+
 	address := os.Getenv("GALLERY_API_ADDR")
 	if address == "" {
 		address = ":8080"
 	}
 
 	// The HTTP handler has no knowledge of its process or hosting environment.
-	// That keeps local development identical to the later API Gateway adapter.
+	// This keeps local development behavior identical to the Lambda route logic.
 	server := &http.Server{
 		Addr:              address,
-		Handler:           httpapi.NewHandler(gallery.NewSeedRepository()),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
