@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/gallery"
@@ -41,6 +42,14 @@ func (handler *Handler) serveHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.collection(writer, request)
 	case strings.HasPrefix(request.URL.Path, "/photos/"):
 		handler.photo(writer, request)
+	case request.URL.Path == "/admin/collections":
+		handler.adminCollections(writer, request)
+	case strings.HasPrefix(request.URL.Path, "/admin/collections/"):
+		handler.adminCollection(writer, request)
+	case request.URL.Path == "/admin/photos":
+		handler.adminPhotos(writer, request)
+	case strings.HasPrefix(request.URL.Path, "/admin/photos/"):
+		handler.adminPhoto(writer, request)
 	default:
 		writeError(writer, http.StatusNotFound, "not_found", "route not found")
 	}
@@ -79,6 +88,10 @@ func (handler *Handler) collection(writer http.ResponseWriter, request *http.Req
 		return
 	}
 
+	handler.writeCollectionDetail(writer, request, slug)
+}
+
+func (handler *Handler) writeCollectionDetail(writer http.ResponseWriter, request *http.Request, slug string) {
 	collection, found, err := handler.repository.GetCollectionBySlug(request.Context(), slug)
 	if err != nil {
 		writeRepositoryError(writer, err)
@@ -125,6 +138,63 @@ func (handler *Handler) photo(writer http.ResponseWriter, request *http.Request)
 	writeJSON(writer, http.StatusOK, photo)
 }
 
+// API Gateway's JWT authorizer protects these routes in AWS. The local HTTP
+// server deliberately does not impersonate Cognito, letting handler tests stay
+// focused on request/response behavior. Never expose this handler directly on
+// a public network outside API Gateway.
+func (handler *Handler) adminCollections(writer http.ResponseWriter, request *http.Request) {
+	handler.collections(writer, request)
+}
+
+func (handler *Handler) adminCollection(writer http.ResponseWriter, request *http.Request) {
+	if !requireGet(writer, request) {
+		return
+	}
+
+	slug := strings.TrimPrefix(request.URL.Path, "/admin/collections/")
+	if slug == "" || strings.Contains(slug, "/") {
+		writeError(writer, http.StatusNotFound, "not_found", "collection not found")
+		return
+	}
+
+	handler.writeCollectionDetail(writer, request, slug)
+}
+
+// adminPhotos is a temporary authenticated read path over the small seeded
+// portfolio. It performs one bounded collection query per collection rather
+// than a DynamoDB Scan. Before drafts or larger catalogues are introduced, the
+// write increment will add a dedicated private administrative photo index.
+func (handler *Handler) adminPhotos(writer http.ResponseWriter, request *http.Request) {
+	if !requireGet(writer, request) {
+		return
+	}
+
+	collections, err := handler.repository.ListCollections(request.Context())
+	if err != nil {
+		writeRepositoryError(writer, err)
+		return
+	}
+
+	photos := make([]gallery.Photo, 0)
+	for _, collection := range collections {
+		collectionPhotos, err := handler.repository.ListPhotosByCollection(request.Context(), collection.ID)
+		if err != nil {
+			writeRepositoryError(writer, err)
+			return
+		}
+		photos = append(photos, collectionPhotos...)
+	}
+
+	sort.SliceStable(photos, func(left, right int) bool {
+		return photos[left].Order < photos[right].Order
+	})
+	writeJSON(writer, http.StatusOK, map[string]any{"items": photos})
+}
+
+func (handler *Handler) adminPhoto(writer http.ResponseWriter, request *http.Request) {
+	handler.photo(writer, request)
+}
+
 func (handler *Handler) withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		origin := request.Header.Get("Origin")
@@ -135,7 +205,7 @@ func (handler *Handler) withCORS(next http.Handler) http.Handler {
 
 		if request.Method == http.MethodOptions {
 			writer.Header().Set("Access-Control-Allow-Methods", http.MethodGet+", OPTIONS")
-			writer.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 			writer.WriteHeader(http.StatusNoContent)
 			return
 		}

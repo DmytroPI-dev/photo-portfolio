@@ -8,3 +8,14 @@ body,
 body {
   background: #151515;
 }
+
+/* The OAuth redirect and callback routes render outside React-admin so the
+   protected admin router cannot intercept Cognito's one-time code. */
+.auth-status {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: #151515;
+  color: #ece9e2;
+}

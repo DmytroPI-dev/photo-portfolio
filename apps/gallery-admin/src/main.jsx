@@ -1,6 +1,10 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { Admin, Resource, defaultTheme } from "react-admin";
+import { Admin, CustomRoutes, Resource, defaultTheme } from "react-admin";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { AuthCallback } from "./AuthCallback";
+import { CognitoLogin } from "./CognitoLogin";
+import { authProvider, getAccessToken, isAuthConfigured } from "./authProvider";
 import { GalleryDataProvider } from "./galleryDataProvider";
 import { CollectionList, CollectionShow } from "./resources/collections";
 import { PhotoList, PhotoShow } from "./resources/photos";
@@ -23,11 +27,41 @@ const theme = {
   },
 };
 
+const AdminConsole = () => (
+  <Admin
+    authProvider={authProvider}
+    dataProvider={GalleryDataProvider(apiUrl, getAccessToken)}
+    loginPage={CognitoLogin}
+    requireAuth
+    theme={theme}
+    title="Gallery Administration"
+  >
+    <Resource name="collections" list={CollectionList} show={CollectionShow} />
+    <Resource name="photos" list={PhotoList} show={PhotoShow} />
+  </Admin>
+);
+
+// The code callback cannot live inside <Admin>: requireAuth would send it to
+// /login before oidc-client-ts could exchange Cognito's code for tokens.
+// Routing it outside React-admin leaves admin resources protected while the
+// short callback remains publicly reachable and purpose-specific.
+const App = () => {
+  if (!isAuthConfigured) {
+    return <main className="auth-status">Cognito configuration is required before this administrator console can start.</main>;
+  }
+
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/auth/callback" element={<AuthCallback />} />
+        <Route path="*" element={<AdminConsole />} />
+      </Routes>
+    </BrowserRouter>
+  );
+};
+
 createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <Admin dataProvider={GalleryDataProvider(apiUrl)} theme={theme} title="Gallery Administration">
-      <Resource name="collections" list={CollectionList} show={CollectionShow} />
-      <Resource name="photos" list={PhotoList} show={PhotoShow} />
-    </Admin>
+    <App />
   </React.StrictMode>,
 );

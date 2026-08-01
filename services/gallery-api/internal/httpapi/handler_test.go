@@ -78,6 +78,34 @@ func TestGetPhoto(t *testing.T) {
 	}
 }
 
+func TestAdminReadsExposeTheExpectedCollectionAndPhotoShapes(t *testing.T) {
+	collectionsResponse := request(t, http.MethodGet, "/admin/collections")
+	if collectionsResponse.Code != http.StatusOK {
+		t.Fatalf("collection status = %d, want %d", collectionsResponse.Code, http.StatusOK)
+	}
+
+	var collections struct {
+		Items []gallery.Collection `json:"items"`
+	}
+	decodeJSON(t, collectionsResponse, &collections)
+	if len(collections.Items) != 3 || collections.Items[0].ID != "drawings" {
+		t.Fatalf("admin collections = %#v, want seeded collections", collections.Items)
+	}
+
+	photosResponse := request(t, http.MethodGet, "/admin/photos")
+	if photosResponse.Code != http.StatusOK {
+		t.Fatalf("photo status = %d, want %d", photosResponse.Code, http.StatusOK)
+	}
+
+	var photos struct {
+		Items []gallery.Photo `json:"items"`
+	}
+	decodeJSON(t, photosResponse, &photos)
+	if len(photos.Items) != 16 || photos.Items[0].ID != "drawing-01" || photos.Items[15].ID != "travel-05" {
+		t.Fatalf("admin photos = %#v, want all seeded photos in display order", photos.Items)
+	}
+}
+
 func TestUnknownResourceReturnsJSONNotFound(t *testing.T) {
 	response := request(t, http.MethodGet, "/collections/missing")
 
@@ -109,6 +137,9 @@ func TestOptionsAllowsLocalViteOrigin(t *testing.T) {
 	}
 	if origin := response.Header().Get("Access-Control-Allow-Origin"); origin != "http://localhost:5173" {
 		t.Fatalf("CORS origin = %q, want local Vite origin", origin)
+	}
+	if headers := response.Header().Get("Access-Control-Allow-Headers"); headers != "Authorization, Content-Type" {
+		t.Fatalf("CORS headers = %q, want Authorization and Content-Type", headers)
 	}
 }
 

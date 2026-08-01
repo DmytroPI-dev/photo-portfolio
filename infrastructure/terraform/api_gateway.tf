@@ -9,7 +9,7 @@ resource "aws_apigatewayv2_api" "gallery" {
 
   cors_configuration {
     allow_credentials = false
-    allow_headers     = ["content-type"]
+    allow_headers     = ["authorization", "content-type"]
     allow_methods     = ["GET", "OPTIONS"]
     allow_origins     = var.allowed_cors_origins
     max_age           = 3600
@@ -47,6 +47,44 @@ resource "aws_apigatewayv2_route" "photo" {
   api_id    = aws_apigatewayv2_api.gallery.id
   route_key = "GET /photos/{id}"
   target    = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+}
+
+# The public routes above remain anonymous. Admin reads opt into Cognito and
+# the narrow read scope before reaching the shared Lambda integration.
+resource "aws_apigatewayv2_route" "admin_collections" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "GET /admin/collections"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/read"]
+}
+
+resource "aws_apigatewayv2_route" "admin_collection" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "GET /admin/collections/{slug}"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/read"]
+}
+
+resource "aws_apigatewayv2_route" "admin_photos" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "GET /admin/photos"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/read"]
+}
+
+resource "aws_apigatewayv2_route" "admin_photo" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "GET /admin/photos/{id}"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/read"]
 }
 
 resource "aws_apigatewayv2_stage" "default" {
