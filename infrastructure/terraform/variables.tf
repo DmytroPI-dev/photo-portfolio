@@ -52,7 +52,29 @@ variable "allowed_cors_origins" {
   default = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
     "https://photo-gallery.i-dmytro.org",
+  ]
+}
+
+variable "admin_callback_urls" {
+  description = "OAuth callback URLs for the React-admin SPA. The production hostname is reserved until its CloudFront distribution is deployed."
+  type        = list(string)
+  default = [
+    "http://localhost:5174/auth/callback",
+    "http://127.0.0.1:5174/auth/callback",
+    "https://admin.photo-gallery.i-dmytro.org/auth/callback",
+  ]
+}
+
+variable "admin_logout_urls" {
+  description = "OAuth logout return URLs for the React-admin SPA."
+  type        = list(string)
+  default = [
+    "http://localhost:5174/",
+    "http://127.0.0.1:5174/",
+    "https://admin.photo-gallery.i-dmytro.org/",
   ]
 }
 

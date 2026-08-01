@@ -22,3 +22,18 @@ output "cost_anomaly_monitor_arn" {
   description = "External account-wide Cost Anomaly Detection service monitor ARN used by this project's alert subscription."
   value       = var.service_anomaly_monitor_arn
 }
+
+output "admin_cognito_issuer" {
+  description = "Cognito issuer used by API Gateway's future protected admin routes."
+  value       = "https://cognito-idp.${var.aws_region}.amazonaws.com/${aws_cognito_user_pool.gallery_admin.id}"
+}
+
+output "admin_cognito_domain" {
+  description = "Cognito hosted-UI base domain for the administrator SPA."
+  value       = "https://${aws_cognito_user_pool_domain.gallery_admin.domain}.auth.${var.aws_region}.amazoncognito.com"
+}
+
+output "admin_cognito_client_id" {
+  description = "Public OAuth client ID for the React-admin SPA; it is not a secret."
+  value       = aws_cognito_user_pool_client.gallery_admin.id
+}
