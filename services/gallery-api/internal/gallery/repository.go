@@ -1,6 +1,7 @@
 package gallery
 
 import (
+	"context"
 	"sort"
 )
 
@@ -8,10 +9,10 @@ import (
 // The in-memory implementation is intentionally small for Phase 1; a
 // DynamoDB implementation can satisfy this same interface later.
 type Repository interface {
-	ListCollections() []Collection
-	GetCollectionBySlug(slug string) (Collection, bool)
-	ListPhotosByCollection(collectionID string) []Photo
-	GetPhotoByID(id string) (Photo, bool)
+	ListCollections(ctx context.Context) ([]Collection, error)
+	GetCollectionBySlug(ctx context.Context, slug string) (Collection, bool, error)
+	ListPhotosByCollection(ctx context.Context, collectionID string) ([]Photo, error)
+	GetPhotoByID(ctx context.Context, id string) (Photo, bool, error)
 }
 
 type MemoryRepository struct {
@@ -48,26 +49,26 @@ func NewMemoryRepository(collections []Collection, photos []Photo) *MemoryReposi
 	return repository
 }
 
-func (repository *MemoryRepository) ListCollections() []Collection {
-	return append([]Collection(nil), repository.collections...)
+func (repository *MemoryRepository) ListCollections(_ context.Context) ([]Collection, error) {
+	return append([]Collection(nil), repository.collections...), nil
 }
 
-func (repository *MemoryRepository) GetCollectionBySlug(slug string) (Collection, bool) {
+func (repository *MemoryRepository) GetCollectionBySlug(_ context.Context, slug string) (Collection, bool, error) {
 	collection, found := repository.collectionsBySlug[slug]
-	return collection, found
+	return collection, found, nil
 }
 
-func (repository *MemoryRepository) ListPhotosByCollection(collectionID string) []Photo {
+func (repository *MemoryRepository) ListPhotosByCollection(_ context.Context, collectionID string) ([]Photo, error) {
 	photos := make([]Photo, 0)
 	for _, photo := range repository.photos {
 		if photo.CollectionID == collectionID {
 			photos = append(photos, photo)
 		}
 	}
-	return photos
+	return photos, nil
 }
 
-func (repository *MemoryRepository) GetPhotoByID(id string) (Photo, bool) {
+func (repository *MemoryRepository) GetPhotoByID(_ context.Context, id string) (Photo, bool, error) {
 	photo, found := repository.photosByID[id]
-	return photo, found
+	return photo, found, nil
 }

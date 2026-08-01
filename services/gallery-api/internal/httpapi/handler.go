@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -56,9 +57,13 @@ func (handler *Handler) collections(writer http.ResponseWriter, request *http.Re
 		return
 	}
 
-	writeJSON(writer, http.StatusOK, map[string]any{
-		"items": handler.repository.ListCollections(),
-	})
+	collections, err := handler.repository.ListCollections(request.Context())
+	if err != nil {
+		writeRepositoryError(writer, err)
+		return
+	}
+
+	writeJSON(writer, http.StatusOK, map[string]any{"items": collections})
 }
 
 func (handler *Handler) collection(writer http.ResponseWriter, request *http.Request) {
@@ -72,15 +77,25 @@ func (handler *Handler) collection(writer http.ResponseWriter, request *http.Req
 		return
 	}
 
-	collection, found := handler.repository.GetCollectionBySlug(slug)
+	collection, found, err := handler.repository.GetCollectionBySlug(request.Context(), slug)
+	if err != nil {
+		writeRepositoryError(writer, err)
+		return
+	}
 	if !found {
 		writeError(writer, http.StatusNotFound, "not_found", "collection not found")
 		return
 	}
 
+	photos, err := handler.repository.ListPhotosByCollection(request.Context(), collection.ID)
+	if err != nil {
+		writeRepositoryError(writer, err)
+		return
+	}
+
 	writeJSON(writer, http.StatusOK, gallery.CollectionDetail{
 		Collection: collection,
-		Photos:     handler.repository.ListPhotosByCollection(collection.ID),
+		Photos:     photos,
 	})
 }
 
@@ -95,7 +110,11 @@ func (handler *Handler) photo(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 
-	photo, found := handler.repository.GetPhotoByID(id)
+	photo, found, err := handler.repository.GetPhotoByID(request.Context(), id)
+	if err != nil {
+		writeRepositoryError(writer, err)
+		return
+	}
 	if !found {
 		writeError(writer, http.StatusNotFound, "not_found", "photo not found")
 		return
@@ -146,4 +165,11 @@ func writeError(writer http.ResponseWriter, status int, code, message string) {
 			"message": message,
 		},
 	})
+}
+
+func writeRepositoryError(writer http.ResponseWriter, err error) {
+	// Keep the underlying DynamoDB error in Lambda logs, but never expose table
+	// names, request details, or AWS errors through the public API response.
+	log.Printf("gallery repository request failed: %v", err)
+	writeError(writer, http.StatusInternalServerError, "internal_error", "unable to read gallery data")
 }

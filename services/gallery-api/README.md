@@ -1,33 +1,25 @@
 # Gallery API
 
-The Gallery API provides the public collection and photo metadata contract. It
-currently uses an in-memory seed repository matching the frontend placeholders;
-the DynamoDB repository will replace that implementation without changing the
-HTTP routes.
+The API exposes public collection and photo metadata. Locally it uses the
+placeholder repository; the deployed Lambda reads the DynamoDB table named by
+`GALLERY_METADATA_TABLE`.
 
 ## Local development
 
 ```bash
-GALLERY_API_ADDR=127.0.0.1:8080 go run ./cmd/api
-go test ./...
+go run ./cmd/api
+curl http://localhost:8080/health
 ```
 
-The public routes are:
+## Bootstrap DynamoDB metadata
 
-```text
-GET /health
-GET /collections
-GET /collections/{slug}
-GET /photos/{id}
-```
-
-## Lambda package
-
-From the repository root:
+The command below uses the current AWS CLI/SDK identity to write the
+deterministic placeholder records. It overwrites those fixed seed keys, so do
+not run it after real administrator-authored records exist unless resetting
+them is intentional.
 
 ```bash
-./scripts/package-gallery-api.sh
+GALLERY_METADATA_TABLE=photo-portfolio-prod-gallery-metadata go run ./cmd/seed
 ```
 
-It creates `services/gallery-api/build/gallery-api.zip`, containing the Linux
-ARM64 `bootstrap` binary used by the `provided.al2023` Lambda runtime.
+The public Lambda remains read-only; this command is the only Phase 1 writer.

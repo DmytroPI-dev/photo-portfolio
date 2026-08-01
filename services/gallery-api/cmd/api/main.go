@@ -1,19 +1,25 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
-	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/gallery"
+	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/appconfig"
 	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/httpapi"
 	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/lambdaadapter"
 	"github.com/aws/aws-lambda-go/lambda"
 )
 
 func main() {
-	handler := httpapi.NewHandler(gallery.NewSeedRepository())
+	repository, err := appconfig.NewRepository(context.Background())
+	if err != nil {
+		log.Fatalf("configure gallery repository: %v", err)
+	}
+
+	handler := httpapi.NewHandler(repository)
 	if os.Getenv("AWS_LAMBDA_RUNTIME_API") != "" {
 		// provided.al2023 invokes the custom-runtime bootstrap binary through the
 		// Lambda Runtime API. The adapter preserves the local net/http handler so

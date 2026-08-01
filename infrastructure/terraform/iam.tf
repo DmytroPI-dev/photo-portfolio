@@ -21,5 +21,23 @@ resource "aws_iam_role_policy_attachment" "gallery_api_basic_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# The first deployed Lambda uses in-memory metadata. DynamoDB permissions are
-# intentionally added with the DynamoDB repository, rather than granted early.
+data "aws_iam_policy_document" "gallery_api_metadata_read" {
+  statement {
+    effect = "Allow"
+
+    # Public routes issue only GetItem and Query operations. Write access is
+    # reserved for the separately run metadata bootstrap/admin path.
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:Query",
+    ]
+
+    resources = [aws_dynamodb_table.gallery_metadata.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "gallery_api_metadata_read" {
+  name   = "${local.name_prefix}-gallery-metadata-read"
+  role   = aws_iam_role.gallery_api.id
+  policy = data.aws_iam_policy_document.gallery_api_metadata_read.json
+}

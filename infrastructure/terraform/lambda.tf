@@ -18,8 +18,17 @@ resource "aws_lambda_function" "gallery_api" {
   memory_size   = var.api_memory_size
   timeout       = var.api_timeout_seconds
 
+  # An empty value selects the local in-memory seed repository. Terraform sets
+  # this in Lambda so production fails clearly rather than serving stale data.
+  environment {
+    variables = {
+      GALLERY_METADATA_TABLE = aws_dynamodb_table.gallery_metadata.name
+    }
+  }
+
   depends_on = [
     aws_cloudwatch_log_group.gallery_api,
     aws_iam_role_policy_attachment.gallery_api_basic_execution,
+    aws_iam_role_policy.gallery_api_metadata_read,
   ]
 }

@@ -4,6 +4,14 @@ package gallery
 // a real, stable contract before DynamoDB exists, while the frontend keeps its
 // current local-data fallback until the deployed API has been validated.
 func NewSeedRepository() *MemoryRepository {
+	collections, photos := SeedData()
+	return NewMemoryRepository(collections, photos)
+}
+
+// SeedData is used only to bootstrap the first DynamoDB contents and to retain
+// a convenient local-development fallback. It is not loaded by the deployed
+// Lambda once GALLERY_METADATA_TABLE is configured.
+func SeedData() ([]Collection, []Photo) {
 	collections := []Collection{
 		{
 			ID:           "drawings",
@@ -50,7 +58,7 @@ func NewSeedRepository() *MemoryRepository {
 		seedPhoto("travel-05", "Travel Study 05", "Placeholder for a final travel image.", "16.JPG", "travel", 1267, 1690, false, 16),
 	}
 
-	return NewMemoryRepository(collections, photos)
+	return collections, photos
 }
 
 func seedPhoto(id, title, description, filename, collectionID string, width, height int, featured bool, order int) Photo {
