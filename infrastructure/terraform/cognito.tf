@@ -5,7 +5,9 @@ resource "aws_cognito_user_pool" "gallery_admin" {
   name                     = local.admin_user_pool
   username_attributes      = ["email"]
   auto_verified_attributes = ["email"]
-  mfa_configuration        = "OPTIONAL"
+  # This pool is exclusively for gallery administrators. A TOTP app keeps a
+  # leaked password from being sufficient to access the console.
+  mfa_configuration        = "ON"
   deletion_protection      = "ACTIVE"
 
   admin_create_user_config {

@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { Admin, CustomRoutes, Resource, defaultTheme } from "react-admin";
+import { Admin, Resource, defaultTheme } from "react-admin";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AuthCallback } from "./AuthCallback";
 import { CognitoLogin } from "./CognitoLogin";
@@ -60,7 +60,23 @@ const App = () => {
   );
 };
 
-createRoot(document.getElementById("root")).render(
+const rootElement = document.getElementById("root");
+
+if (!rootElement) {
+  throw new Error("Gallery administration could not find its root element.");
+}
+
+// Vite can re-evaluate this entry module during development and may replace
+// the root DOM node. Check if React has already created a root on this element
+// (React stores it as _reactRootContainer). Only create a new root if one
+// doesn't already exist, preventing the "already passed to createRoot" warning.
+let root = rootElement._reactRootContainer;
+
+if (!root) {
+  root = createRoot(rootElement);
+}
+
+root.render(
   <React.StrictMode>
     <App />
   </React.StrictMode>,
