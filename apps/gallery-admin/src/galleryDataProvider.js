@@ -1,59 +1,81 @@
-import { HttpError } from "react-admin";
+// The admin UI intentionally talks to the Go API through this small client
+// rather than through a framework adapter. Keeping HTTP concerns here makes
+// pages ordinary Chakra/React components and keeps future API changes local.
+export class GalleryApiError extends Error {
+  constructor(message, status, body) {
+    super(message);
+    this.name = "GalleryApiError";
+    this.status = status;
+    this.body = body;
+    this.code = body?.error?.code;
+  }
+}
 
-const unsupported = (operation) => () =>
-  Promise.reject(new Error(`${operation} is not available until protected admin mutations are deployed.`));
+const collectionPayload = (data, includeSlug, version) => ({
+  ...(includeSlug ? { slug: data.slug.trim() } : {}),
+  title: data.title.trim(),
+  description: data.description.trim(),
+  coverPhotoId: data.coverPhotoId.trim(),
+  order: Number(data.order),
+  ...(includeSlug ? {} : { version }),
+});
 
-// React-admin remains independent of the Go route shapes. This adapter is the
-// only place that understands today's public read API and tomorrow's protected
-// admin endpoints, so backend routes can remain small and domain-oriented.
-export const GalleryDataProvider = (apiBaseUrl, getAccessToken) => {
-  const request = async (path) => {
+export const GalleryApi = (apiBaseUrl, getAccessToken) => {
+  const request = async (path, options = {}) => {
     const accessToken = await getAccessToken();
     const response = await fetch(`${apiBaseUrl}${path}`, {
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+      method: options.method || "GET",
+      headers: {
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
     });
-    if (!response.ok) {
-      throw new HttpError(await response.text(), response.status);
-    }
-    return response.json();
-  };
 
-  const listPhotos = async () => {
-    const { items } = await request("/admin/photos");
-    return items;
+    const text = await response.text();
+    let body;
+    try {
+      body = text ? JSON.parse(text) : undefined;
+    } catch {
+      body = undefined;
+    }
+
+    if (!response.ok) {
+      throw new GalleryApiError(body?.error?.message || text || "The gallery API request failed.", response.status, body);
+    }
+    return body;
   };
 
   return {
-    async getList(resource, params) {
-      const records = resource === "collections" ? (await request("/admin/collections")).items : await listPhotos();
-      const { page, perPage } = params.pagination;
-      const start = (page - 1) * perPage;
-
-      return {
-        data: records.slice(start, start + perPage),
-        total: records.length,
-      };
+    async listCollections() {
+      const response = await request("/admin/collections");
+      return response.items;
     },
 
-    async getOne(resource, params) {
-      if (resource === "collections") {
-        return { data: await request(`/admin/collections/${params.id}`) };
-      }
-      return { data: await request(`/admin/photos/${params.id}`) };
+    getCollection: (id) => request(`/admin/collections/${encodeURIComponent(id)}`),
+
+    createCollection: (data) =>
+      request("/admin/collections", {
+        method: "POST",
+        body: collectionPayload(data, true),
+      }),
+
+    async updateCollection(id, data) {
+      // Fetch immediately before mutation. The server still performs an atomic
+      // conditional write, so a real concurrent update returns version_conflict
+      // instead of silently overwriting another administrator's change.
+      const current = await request(`/admin/collections/${encodeURIComponent(id)}`);
+      return request(`/admin/collections/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: collectionPayload(data, false, current.version),
+      });
     },
 
-    async getMany(resource, params) {
-      const records = await Promise.all(
-        params.ids.map((id) => request(resource === "collections" ? `/admin/collections/${id}` : `/admin/photos/${id}`)),
-      );
-      return { data: records };
+    async listPhotos() {
+      const response = await request("/admin/photos");
+      return response.items;
     },
 
-    getManyReference: unsupported("getManyReference"),
-    create: unsupported("create"),
-    update: unsupported("update"),
-    updateMany: unsupported("updateMany"),
-    delete: unsupported("delete"),
-    deleteMany: unsupported("deleteMany"),
+    getPhoto: (id) => request(`/admin/photos/${encodeURIComponent(id)}`),
   };
 };

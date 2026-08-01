@@ -105,13 +105,79 @@ func TestDynamoRepositoryReadsCanonicalAdminRecords(t *testing.T) {
 	}
 }
 
+func TestDynamoRepositoryCreatesDraftCollectionWithoutPublicCopies(t *testing.T) {
+	collection := AdminCollection{
+		Collection: Collection{ID: "sketches", Slug: "sketches", Title: "Sketches", Order: 4},
+		Status:     PublicationDraft,
+		Version:    1,
+	}
+	client := &dynamoStub{transactWriteOutput: &dynamodb.TransactWriteItemsOutput{}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	if err := repository.CreateAdminCollection(context.Background(), collection); err != nil {
+		t.Fatalf("CreateAdminCollection returned error: %v", err)
+	}
+	if len(client.transactWriteInput.TransactItems) != 2 {
+		t.Fatalf("transaction items = %d, want canonical record and admin index", len(client.transactWriteInput.TransactItems))
+	}
+
+	canonical := client.transactWriteInput.TransactItems[0].Put
+	index := client.transactWriteInput.TransactItems[1].Put
+	if got := attributeString(t, canonical.Item["PK"]); got != "COLLECTION#sketches" {
+		t.Fatalf("canonical PK = %q, want COLLECTION#sketches", got)
+	}
+	if got := attributeString(t, canonical.Item["SK"]); got != canonicalAdminSortKey {
+		t.Fatalf("canonical SK = %q, want ADMIN", got)
+	}
+	if got := attributeString(t, index.Item["PK"]); got != adminCollectionsPartition {
+		t.Fatalf("index PK = %q, want %s", got, adminCollectionsPartition)
+	}
+}
+
+func TestDynamoRepositoryUpdatesPublishedCollectionAndPublicCopies(t *testing.T) {
+	previous := AdminCollection{
+		Collection: Collection{ID: "drawings", Slug: "drawings", Title: "Drawings", Order: 1},
+		Status:     PublicationPublished,
+		Version:    1,
+	}
+	next := previous
+	next.Title = "Hand Drawings"
+	next.Order = 2
+	next.Version = 2
+	client := &dynamoStub{transactWriteOutput: &dynamodb.TransactWriteItemsOutput{}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	if err := repository.UpdateAdminCollection(context.Background(), previous, next); err != nil {
+		t.Fatalf("UpdateAdminCollection returned error: %v", err)
+	}
+	if len(client.transactWriteInput.TransactItems) != 6 {
+		t.Fatalf("transaction items = %d, want canonical, indexes, and public copies", len(client.transactWriteInput.TransactItems))
+	}
+
+	publicMetadata := client.transactWriteInput.TransactItems[4].Put
+	publicIndex := client.transactWriteInput.TransactItems[5].Put
+	canonical := client.transactWriteInput.TransactItems[0].Put
+	if got := attributeString(t, publicMetadata.Item["SK"]); got != metadataSortKey {
+		t.Fatalf("public metadata SK = %q, want META", got)
+	}
+	if got := attributeString(t, publicIndex.Item["PK"]); got != collectionsPartition {
+		t.Fatalf("public index PK = %q, want COLLECTIONS", got)
+	}
+	if got := canonical.ExpressionAttributeNames["#version"]; got != "Version" {
+		t.Fatalf("version condition attribute = %q, want Version", got)
+	}
+}
+
 type dynamoStub struct {
-	getInput    *dynamodb.GetItemInput
-	getOutput   *dynamodb.GetItemOutput
-	getErr      error
-	queryInput  *dynamodb.QueryInput
-	queryOutput *dynamodb.QueryOutput
-	queryErr    error
+	getInput            *dynamodb.GetItemInput
+	getOutput           *dynamodb.GetItemOutput
+	getErr              error
+	queryInput          *dynamodb.QueryInput
+	queryOutput         *dynamodb.QueryOutput
+	queryErr            error
+	transactWriteInput  *dynamodb.TransactWriteItemsInput
+	transactWriteOutput *dynamodb.TransactWriteItemsOutput
+	transactWriteErr    error
 }
 
 func (stub *dynamoStub) GetItem(_ context.Context, input *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
@@ -122,6 +188,11 @@ func (stub *dynamoStub) GetItem(_ context.Context, input *dynamodb.GetItemInput,
 func (stub *dynamoStub) Query(_ context.Context, input *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
 	stub.queryInput = input
 	return stub.queryOutput, stub.queryErr
+}
+
+func (stub *dynamoStub) TransactWriteItems(_ context.Context, input *dynamodb.TransactWriteItemsInput, _ ...func(*dynamodb.Options)) (*dynamodb.TransactWriteItemsOutput, error) {
+	stub.transactWriteInput = input
+	return stub.transactWriteOutput, stub.transactWriteErr
 }
 
 func marshalTestItem(t *testing.T, value any, partition, sort string) map[string]types.AttributeValue {

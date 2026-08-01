@@ -2,6 +2,7 @@ package gallery
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -24,6 +25,7 @@ const (
 type DynamoDBAPI interface {
 	GetItem(ctx context.Context, params *dynamodb.GetItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)
 	Query(ctx context.Context, params *dynamodb.QueryInput, optFns ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error)
+	TransactWriteItems(ctx context.Context, params *dynamodb.TransactWriteItemsInput, optFns ...func(*dynamodb.Options)) (*dynamodb.TransactWriteItemsOutput, error)
 }
 
 // DynamoRepository reads the deliberately duplicated DynamoDB records
@@ -215,6 +217,126 @@ func (repository *DynamoRepository) GetAdminPhotoByID(ctx context.Context, id st
 		return AdminPhoto{}, false, fmt.Errorf("decode admin photo %q: %w", id, err)
 	}
 	return photo, true, nil
+}
+
+// CreateAdminCollection writes only canonical data. New collections begin as
+// drafts, so no anonymous public read records exist until a later publish
+// action explicitly creates them.
+func (repository *DynamoRepository) CreateAdminCollection(ctx context.Context, collection AdminCollection) error {
+	canonicalItem, err := marshalItem(collection, collectionPartition(collection.ID), canonicalAdminSortKey)
+	if err != nil {
+		return fmt.Errorf("marshal canonical collection %q: %w", collection.ID, err)
+	}
+	indexItem, err := marshalItem(collection, adminCollectionsPartition, adminCollectionIndexSortKey(collection))
+	if err != nil {
+		return fmt.Errorf("marshal admin collection index %q: %w", collection.ID, err)
+	}
+
+	_, err = repository.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
+		TransactItems: []types.TransactWriteItem{
+			conditionalPut(repository.table, canonicalItem, "attribute_not_exists(PK)"),
+			conditionalPut(repository.table, indexItem, "attribute_not_exists(PK)"),
+		},
+	})
+	return writeError("create admin collection", err)
+}
+
+// UpdateAdminCollection replaces the canonical document and its ordered index
+// atomically. A version condition prevents two browser tabs from silently
+// overwriting each other's metadata. Published collections update their two
+// public copies in the same transaction; drafts have no public copies yet.
+func (repository *DynamoRepository) UpdateAdminCollection(ctx context.Context, previous, next AdminCollection) error {
+	canonicalItem, err := marshalItem(next, collectionPartition(next.ID), canonicalAdminSortKey)
+	if err != nil {
+		return fmt.Errorf("marshal canonical collection %q: %w", next.ID, err)
+	}
+	newIndexItem, err := marshalItem(next, adminCollectionsPartition, adminCollectionIndexSortKey(next))
+	if err != nil {
+		return fmt.Errorf("marshal admin collection index %q: %w", next.ID, err)
+	}
+
+	items := []types.TransactWriteItem{
+		{
+			Put: &types.Put{
+				TableName:           aws.String(repository.table),
+				Item:                canonicalItem,
+				ConditionExpression: aws.String("#version = :version"),
+				ExpressionAttributeNames: map[string]string{
+					// attributevalue uses the Go field name for DynamoDB attributes
+					// unless a dynamodbav tag is present. Existing canonical seed
+					// data therefore stores this as Version, not JSON's version.
+					"#version": "Version",
+				},
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":version": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", previous.Version)},
+				},
+			},
+		},
+	}
+
+	oldIndexKey := adminCollectionIndexSortKey(previous)
+	newIndexKey := adminCollectionIndexSortKey(next)
+	if oldIndexKey != newIndexKey {
+		items = append(items, deleteItem(repository.table, key(adminCollectionsPartition, oldIndexKey)))
+	}
+	items = append(items, putItem(repository.table, newIndexItem))
+
+	if previous.Status == PublicationPublished {
+		publicMetadata, err := marshalItem(next.Collection, collectionPartition(next.ID), metadataSortKey)
+		if err != nil {
+			return fmt.Errorf("marshal public collection %q: %w", next.ID, err)
+		}
+		publicIndex, err := marshalItem(next.Collection, collectionsPartition, publicCollectionIndexSortKey(next.Collection))
+		if err != nil {
+			return fmt.Errorf("marshal public collection index %q: %w", next.ID, err)
+		}
+
+		oldPublicIndexKey := publicCollectionIndexSortKey(previous.Collection)
+		newPublicIndexKey := publicCollectionIndexSortKey(next.Collection)
+		if oldPublicIndexKey != newPublicIndexKey {
+			items = append(items, deleteItem(repository.table, key(collectionsPartition, oldPublicIndexKey)))
+		}
+		items = append(items, putItem(repository.table, publicMetadata), putItem(repository.table, publicIndex))
+	}
+
+	_, err = repository.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: items})
+	return writeError("update admin collection", err)
+}
+
+func adminCollectionIndexSortKey(collection AdminCollection) string {
+	return fmt.Sprintf("COLLECTION#%04d#%s", collection.Order, collection.ID)
+}
+
+func publicCollectionIndexSortKey(collection Collection) string {
+	return fmt.Sprintf("COLLECTION#%04d#%s", collection.Order, collection.Slug)
+}
+
+func conditionalPut(table string, item map[string]types.AttributeValue, condition string) types.TransactWriteItem {
+	return types.TransactWriteItem{Put: &types.Put{
+		TableName:           aws.String(table),
+		Item:                item,
+		ConditionExpression: aws.String(condition),
+	}}
+}
+
+func putItem(table string, item map[string]types.AttributeValue) types.TransactWriteItem {
+	return types.TransactWriteItem{Put: &types.Put{TableName: aws.String(table), Item: item}}
+}
+
+func deleteItem(table string, itemKey map[string]types.AttributeValue) types.TransactWriteItem {
+	return types.TransactWriteItem{Delete: &types.Delete{TableName: aws.String(table), Key: itemKey}}
+}
+
+func writeError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+
+	var cancelled *types.TransactionCanceledException
+	if errors.As(err, &cancelled) {
+		return ErrVersionConflict
+	}
+	return fmt.Errorf("%s: %w", operation, err)
 }
 
 func key(partition, sort string) map[string]types.AttributeValue {

@@ -1,16 +1,16 @@
 html,
 body,
 #root {
-  min-height: 100%;
+  min-height: 100vh;
   margin: 0;
 }
 
 body {
-  background: #151515;
+  background: #2c3436;
 }
 
-/* The OAuth redirect and callback routes render outside React-admin so the
-   protected admin router cannot intercept Cognito's one-time code. */
+/* OAuth routes intentionally render outside the protected console router so
+   Cognito's one-time authorization code is handled before session checks. */
 .auth-status {
   display: grid;
   min-height: 100vh;

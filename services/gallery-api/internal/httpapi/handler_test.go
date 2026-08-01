@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/gallery"
@@ -119,6 +120,36 @@ func TestAdminPhotoDetailUsesItsOwnRoutePrefix(t *testing.T) {
 	}
 }
 
+func TestAdminCollectionsCreateDraftAndEditWithVersion(t *testing.T) {
+	handler := NewHandler(gallery.NewSeedRepository())
+	create := httptest.NewRequest(http.MethodPost, "/admin/collections", strings.NewReader(`{"slug":"sketches","title":"Sketches","description":"First studies.","order":4}`))
+	create.Header.Set("Content-Type", "application/json")
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, create)
+
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d; body = %s", created.Code, http.StatusCreated, created.Body.String())
+	}
+
+	var collection gallery.AdminCollection
+	decodeJSON(t, created, &collection)
+	if collection.Status != gallery.PublicationDraft || collection.Version != 1 || collection.ID != "sketches" {
+		t.Fatalf("created collection = %#v, want draft sketches version 1", collection)
+	}
+
+	update := httptest.NewRequest(http.MethodPatch, "/admin/collections/sketches", strings.NewReader(`{"title":"Field Sketches","version":1}`))
+	update.Header.Set("Content-Type", "application/json")
+	updated := httptest.NewRecorder()
+	handler.ServeHTTP(updated, update)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want %d; body = %s", updated.Code, http.StatusOK, updated.Body.String())
+	}
+	decodeJSON(t, updated, &collection)
+	if collection.Title != "Field Sketches" || collection.Version != 2 {
+		t.Fatalf("updated collection = %#v, want title and version 2", collection)
+	}
+}
+
 func TestUnknownResourceReturnsJSONNotFound(t *testing.T) {
 	response := request(t, http.MethodGet, "/collections/missing")
 
@@ -153,6 +184,9 @@ func TestOptionsAllowsLocalViteOrigin(t *testing.T) {
 	}
 	if headers := response.Header().Get("Access-Control-Allow-Headers"); headers != "Authorization, Content-Type" {
 		t.Fatalf("CORS headers = %q, want Authorization and Content-Type", headers)
+	}
+	if methods := response.Header().Get("Access-Control-Allow-Methods"); methods != "GET, POST, PATCH, OPTIONS" {
+		t.Fatalf("CORS methods = %q, want GET, POST, PATCH, OPTIONS", methods)
 	}
 }
 

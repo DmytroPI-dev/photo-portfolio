@@ -2,10 +2,12 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/gallery"
 )
@@ -150,21 +152,171 @@ func (handler *Handler) writePhoto(writer http.ResponseWriter, request *http.Req
 // focused on request/response behavior. Never expose this handler directly on
 // a public network outside API Gateway.
 func (handler *Handler) adminCollections(writer http.ResponseWriter, request *http.Request) {
-	handler.collections(writer, request)
-}
-
-func (handler *Handler) adminCollection(writer http.ResponseWriter, request *http.Request) {
-	if !requireGet(writer, request) {
+	store, ok := handler.repository.(gallery.AdminCollectionRepository)
+	if !ok {
+		writeError(writer, http.StatusNotImplemented, "admin_not_configured", "administrator metadata is not configured")
 		return
 	}
 
-	slug := strings.TrimPrefix(request.URL.Path, "/admin/collections/")
-	if slug == "" || strings.Contains(slug, "/") {
+	switch request.Method {
+	case http.MethodGet:
+		collections, err := store.ListAdminCollections(request.Context())
+		if err != nil {
+			writeRepositoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{"items": collections})
+	case http.MethodPost:
+		handler.createAdminCollection(writer, request, store)
+	default:
+		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPost+", OPTIONS")
+	}
+}
+
+func (handler *Handler) adminCollection(writer http.ResponseWriter, request *http.Request) {
+	store, ok := handler.repository.(gallery.AdminCollectionRepository)
+	if !ok {
+		writeError(writer, http.StatusNotImplemented, "admin_not_configured", "administrator metadata is not configured")
+		return
+	}
+
+	id := strings.TrimPrefix(request.URL.Path, "/admin/collections/")
+	if id == "" || strings.Contains(id, "/") {
 		writeError(writer, http.StatusNotFound, "not_found", "collection not found")
 		return
 	}
 
-	handler.writeCollectionDetail(writer, request, slug)
+	switch request.Method {
+	case http.MethodGet:
+		collection, found, err := store.GetAdminCollectionByID(request.Context(), id)
+		if err != nil {
+			writeRepositoryError(writer, err)
+			return
+		}
+		if !found {
+			writeError(writer, http.StatusNotFound, "not_found", "collection not found")
+			return
+		}
+		writeJSON(writer, http.StatusOK, collection)
+	case http.MethodPatch:
+		handler.updateAdminCollection(writer, request, store, id)
+	default:
+		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPatch+", OPTIONS")
+	}
+}
+
+type createCollectionRequest struct {
+	Slug         string `json:"slug"`
+	Title        string `json:"title"`
+	Description  string `json:"description"`
+	CoverPhotoID string `json:"coverPhotoId"`
+	Order        int    `json:"order"`
+}
+
+type updateCollectionRequest struct {
+	Slug         *string `json:"slug"`
+	Title        *string `json:"title"`
+	Description  *string `json:"description"`
+	CoverPhotoID *string `json:"coverPhotoId"`
+	Order        *int    `json:"order"`
+	Version      *int    `json:"version"`
+}
+
+func (handler *Handler) createAdminCollection(writer http.ResponseWriter, request *http.Request, store gallery.AdminCollectionRepository) {
+	var input createCollectionRequest
+	if !decodeRequestJSON(writer, request, &input) {
+		return
+	}
+
+	input.Slug = strings.TrimSpace(input.Slug)
+	input.Title = strings.TrimSpace(input.Title)
+	if !validSlug(input.Slug) {
+		writeError(writer, http.StatusBadRequest, "invalid_slug", "slug must use lowercase letters, numbers, and single hyphens")
+		return
+	}
+	if input.Title == "" || input.Order < 1 {
+		writeError(writer, http.StatusBadRequest, "invalid_collection", "title and a positive display order are required")
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	collection := gallery.AdminCollection{
+		Collection: gallery.Collection{
+			ID:           input.Slug,
+			Slug:         input.Slug,
+			Title:        input.Title,
+			Description:  input.Description,
+			CoverPhotoID: input.CoverPhotoID,
+			Order:        input.Order,
+		},
+		Status:    gallery.PublicationDraft,
+		Version:   1,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := store.CreateAdminCollection(request.Context(), collection); err != nil {
+		writeAdminStoreError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusCreated, collection)
+}
+
+func (handler *Handler) updateAdminCollection(writer http.ResponseWriter, request *http.Request, store gallery.AdminCollectionRepository, id string) {
+	var input updateCollectionRequest
+	if !decodeRequestJSON(writer, request, &input) {
+		return
+	}
+
+	current, found, err := store.GetAdminCollectionByID(request.Context(), id)
+	if err != nil {
+		writeRepositoryError(writer, err)
+		return
+	}
+	if !found {
+		writeError(writer, http.StatusNotFound, "not_found", "collection not found")
+		return
+	}
+	// The first admin-console rollout used a disabled form field for version,
+	// and some browsers submit that as zero. A positive version still enforces
+	// optimistic locking; an omitted or zero legacy value uses this just-read
+	// canonical version and remains protected by the DynamoDB transaction.
+	if input.Version != nil && *input.Version > 0 && *input.Version != current.Version {
+		writeError(writer, http.StatusConflict, "version_conflict", "collection was changed by another request; reload and try again")
+		return
+	}
+	if input.Slug != nil && strings.TrimSpace(*input.Slug) != current.Slug {
+		// The initial public layout uses the slug as the DynamoDB collection
+		// partition. Keep it immutable until an explicit migration exists.
+		writeError(writer, http.StatusBadRequest, "immutable_slug", "collection slug cannot be changed")
+		return
+	}
+
+	next := current
+	if input.Title != nil {
+		next.Title = strings.TrimSpace(*input.Title)
+	}
+	if input.Description != nil {
+		next.Description = *input.Description
+	}
+	if input.CoverPhotoID != nil {
+		next.CoverPhotoID = *input.CoverPhotoID
+	}
+	if input.Order != nil {
+		next.Order = *input.Order
+	}
+	if next.Title == "" || next.Order < 1 {
+		writeError(writer, http.StatusBadRequest, "invalid_collection", "title and a positive display order are required")
+		return
+	}
+	next.Version++
+	next.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+
+	if err := store.UpdateAdminCollection(request.Context(), current, next); err != nil {
+		writeAdminStoreError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, next)
 }
 
 // adminPhotos is a temporary authenticated read path over the small seeded
@@ -221,7 +373,7 @@ func (handler *Handler) withCORS(next http.Handler) http.Handler {
 		}
 
 		if request.Method == http.MethodOptions {
-			writer.Header().Set("Access-Control-Allow-Methods", http.MethodGet+", OPTIONS")
+			writer.Header().Set("Access-Control-Allow-Methods", http.MethodGet+", "+http.MethodPost+", "+http.MethodPatch+", OPTIONS")
 			writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 			writer.WriteHeader(http.StatusNoContent)
 			return
@@ -236,9 +388,45 @@ func requireGet(writer http.ResponseWriter, request *http.Request) bool {
 		return true
 	}
 
-	writer.Header().Set("Allow", http.MethodGet+", OPTIONS")
-	writeError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "only GET is supported")
+	writeMethodNotAllowed(writer, http.MethodGet+", OPTIONS")
 	return false
+}
+
+func writeMethodNotAllowed(writer http.ResponseWriter, allowed string) {
+	writer.Header().Set("Allow", allowed)
+	writeError(writer, http.StatusMethodNotAllowed, "method_not_allowed", "method is not supported for this route")
+}
+
+func decodeRequestJSON(writer http.ResponseWriter, request *http.Request, target any) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 32<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		writeError(writer, http.StatusBadRequest, "invalid_json", "request body must be valid JSON")
+		return false
+	}
+	return true
+}
+
+func validSlug(slug string) bool {
+	if len(slug) == 0 || len(slug) > 80 || slug[0] == '-' || slug[len(slug)-1] == '-' {
+		return false
+	}
+
+	previousHyphen := false
+	for _, character := range slug {
+		isLowercaseLetter := character >= 'a' && character <= 'z'
+		isDigit := character >= '0' && character <= '9'
+		if isLowercaseLetter || isDigit {
+			previousHyphen = false
+			continue
+		}
+		if character == '-' && !previousHyphen {
+			previousHyphen = true
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func writeJSON(writer http.ResponseWriter, status int, value any) {
@@ -261,4 +449,16 @@ func writeRepositoryError(writer http.ResponseWriter, err error) {
 	// names, request details, or AWS errors through the public API response.
 	log.Printf("gallery repository request failed: %v", err)
 	writeError(writer, http.StatusInternalServerError, "internal_error", "unable to read gallery data")
+}
+
+func writeAdminStoreError(writer http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, gallery.ErrAlreadyExists):
+		writeError(writer, http.StatusConflict, "already_exists", "a collection with that identifier already exists")
+	case errors.Is(err, gallery.ErrVersionConflict):
+		writeError(writer, http.StatusConflict, "version_conflict", "collection was changed by another request; reload and try again")
+	default:
+		log.Printf("gallery admin write failed: %v", err)
+		writeError(writer, http.StatusInternalServerError, "internal_error", "unable to update gallery metadata")
+	}
 }

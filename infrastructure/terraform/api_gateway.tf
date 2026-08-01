@@ -10,7 +10,7 @@ resource "aws_apigatewayv2_api" "gallery" {
   cors_configuration {
     allow_credentials = false
     allow_headers     = ["authorization", "content-type"]
-    allow_methods     = ["GET", "OPTIONS"]
+    allow_methods     = ["GET", "POST", "PATCH", "OPTIONS"]
     allow_origins     = var.allowed_cors_origins
     max_age           = 3600
   }
@@ -67,6 +67,24 @@ resource "aws_apigatewayv2_route" "admin_collection" {
   authorization_type   = "JWT"
   authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
   authorization_scopes = ["gallery/read"]
+}
+
+resource "aws_apigatewayv2_route" "admin_collections_write" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "POST /admin/collections"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/write"]
+}
+
+resource "aws_apigatewayv2_route" "admin_collection_write" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "PATCH /admin/collections/{id}"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/write"]
 }
 
 resource "aws_apigatewayv2_route" "admin_photos" {

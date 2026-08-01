@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { authProvider } from "./authProvider";
+import { startSignIn } from "./authProvider";
 
-// React-admin normally renders a local username/password form at /login. This
-// application delegates credential entry entirely to Cognito, so reaching that
-// route immediately starts the hosted-login authorization-code flow instead.
+// This app delegates credential entry entirely to Cognito, so the local login
+// route immediately begins the hosted authorization-code-with-PKCE flow.
 export const CognitoLogin = () => {
   const hasStarted = useRef(false);
   const [error, setError] = useState("");
@@ -16,7 +15,7 @@ export const CognitoLogin = () => {
     }
 
     hasStarted.current = true;
-    authProvider.login().catch((reason) => {
+    startSignIn().catch((reason) => {
       setError(reason instanceof Error ? reason.message : "Unable to start secure sign-in.");
     });
   }, []);

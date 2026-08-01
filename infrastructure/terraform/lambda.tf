@@ -30,5 +30,6 @@ resource "aws_lambda_function" "gallery_api" {
     aws_cloudwatch_log_group.gallery_api,
     aws_iam_role_policy_attachment.gallery_api_basic_execution,
     aws_iam_role_policy.gallery_api_metadata_read,
+    aws_iam_role_policy.gallery_api_metadata_write,
   ]
 }

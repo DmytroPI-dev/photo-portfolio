@@ -29,76 +29,45 @@ const requireUserManager = () => {
   return userManager;
 };
 
-export const authProvider = {
-  // React-admin may call login with form/redirect parameters of its own. Keep
-  // the Cognito request explicit so only the registered PKCE callback and
-  // approved scopes are ever sent to the authorization endpoint.
-  login: () =>
-    requireUserManager().signinRedirect({
-      redirect_uri: `${window.location.origin}/auth/callback`,
-      response_type: "code",
-      scope,
-    }),
+// Cognito's hosted-login page owns credential entry. Keeping this redirect in
+// one function prevents the SPA from ever handling a password or client secret.
+export const startSignIn = () =>
+  requireUserManager().signinRedirect({
+    redirect_uri: `${window.location.origin}/auth/callback`,
+    response_type: "code",
+    scope,
+  });
 
-  async logout() {
-    const manager = requireUserManager();
-    const user = await manager.getUser();
-    await manager.removeUser();
+export const signOut = async () => {
+  const manager = requireUserManager();
+  const user = await manager.getUser();
+  await manager.removeUser();
 
-    // Cognito's managed /logout endpoint isn't a standard OIDC end-session
-    // endpoint. It requires its app client ID and an allow-listed `logout_uri`,
-    // whereas oidc-client-ts sends an OIDC `id_token_hint`. Build Cognito's
-    // documented URL directly, after clearing the app's local token session.
-    // React-admin also calls logout when an anonymous visitor is redirected to
-    // /login; only contact Cognito when there was an actual OIDC session.
-    if (!user?.id_token) {
-      return;
-    }
+  // Cognito's hosted /logout endpoint is not a standard OIDC end-session
+  // endpoint. It needs the registered client ID and logout URI explicitly.
+  // Avoid redirecting there when no Cognito session exists, for example after a
+  // locally expired access token.
+  if (!user?.id_token) {
+    window.location.assign("/");
+    return;
+  }
 
-    const logoutUrl = new URL("/logout", cognitoDomain);
-    logoutUrl.searchParams.set("client_id", clientId);
-    logoutUrl.searchParams.set("logout_uri", `${window.location.origin}/`);
-    window.location.assign(logoutUrl.toString());
-  },
-
-  async checkAuth() {
-    const user = await requireUserManager().getUser();
-    if (!user || user.expired) {
-      return Promise.reject();
-    }
-  },
-
-  async checkError(error) {
-    if (error?.status === 401 || error?.status === 403) {
-      await requireUserManager().removeUser();
-      return Promise.reject();
-    }
-  },
-
-  async getIdentity() {
-    const user = await requireUserManager().getUser();
-    if (!user || user.expired) {
-      return Promise.reject();
-    }
-
-    return {
-      id: user.profile.sub,
-      fullName: user.profile.name || user.profile.email || user.profile.username,
-    };
-  },
-
-  async getPermissions() {
-    const user = await requireUserManager().getUser();
-    return user?.scope?.split(" ") || [];
-  },
+  const logoutUrl = new URL("/logout", cognitoDomain);
+  logoutUrl.searchParams.set("client_id", clientId);
+  logoutUrl.searchParams.set("logout_uri", `${window.location.origin}/`);
+  window.location.assign(logoutUrl.toString());
 };
 
-// The callback route completes the PKCE exchange before React-admin checks the
-// session. Keeping it here gives the app one authority for login, logout, and
-// future bearer tokens supplied to protected /admin API requests.
+// The callback route completes PKCE before protected console routes inspect
+// the session. Keeping it here gives the app one owner for token lifecycle.
 export const completeSignIn = () => requireUserManager().signinRedirectCallback();
 
-export const getAccessToken = async () => {
+export const getAuthenticatedUser = async () => {
   const user = await requireUserManager().getUser();
-  return user && !user.expired ? user.access_token : null;
+  return user && !user.expired ? user : null;
+};
+
+export const getAccessToken = async () => {
+  const user = await getAuthenticatedUser();
+  return user?.access_token || null;
 };
