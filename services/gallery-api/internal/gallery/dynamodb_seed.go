@@ -39,12 +39,14 @@ func SeedDynamo(ctx context.Context, client BatchWriteAPI, table string) (int, e
 	return len(requests), nil
 }
 
-// SeedWriteRequests builds four explicit access patterns: ordered collection
-// list, collection metadata by slug, ordered collection photos, and a photo by
-// ID. These copies remove the need for a table scan or an index at this scale.
+// SeedWriteRequests builds the four public read models plus canonical private
+// administrator records and their ordered indexes. Public records remain
+// deliberately duplicated for fast anonymous reads; future writes begin with
+// canonical records and update public copies transactionally on publication.
 func SeedWriteRequests() ([]types.WriteRequest, error) {
 	collections, photos := SeedData()
-	requests := make([]types.WriteRequest, 0, len(collections)*2+len(photos)*2)
+	adminCollections, adminPhotos := CanonicalSeedData()
+	requests := make([]types.WriteRequest, 0, len(collections)*4+len(photos)*4)
 
 	for _, collection := range collections {
 		indexItem, err := marshalItem(collection, collectionsPartition, fmt.Sprintf("COLLECTION#%04d#%s", collection.Order, collection.Slug))
@@ -68,6 +70,30 @@ func SeedWriteRequests() ([]types.WriteRequest, error) {
 			return nil, fmt.Errorf("marshal photo metadata %q: %w", photo.ID, err)
 		}
 		requests = append(requests, putRequest(collectionItem), putRequest(metadataItem))
+	}
+
+	for _, collection := range adminCollections {
+		canonicalItem, err := marshalItem(collection, collectionPartition(collection.ID), canonicalAdminSortKey)
+		if err != nil {
+			return nil, fmt.Errorf("marshal canonical collection %q: %w", collection.ID, err)
+		}
+		indexItem, err := marshalItem(collection, adminCollectionsPartition, fmt.Sprintf("COLLECTION#%04d#%s", collection.Order, collection.ID))
+		if err != nil {
+			return nil, fmt.Errorf("marshal admin collection index %q: %w", collection.ID, err)
+		}
+		requests = append(requests, putRequest(canonicalItem), putRequest(indexItem))
+	}
+
+	for _, photo := range adminPhotos {
+		canonicalItem, err := marshalItem(photo, photoPartition(photo.ID), canonicalAdminSortKey)
+		if err != nil {
+			return nil, fmt.Errorf("marshal canonical photo %q: %w", photo.ID, err)
+		}
+		indexItem, err := marshalItem(photo, adminPhotosPartition, fmt.Sprintf("PHOTO#%s#%04d#%s", photo.CollectionID, photo.Order, photo.ID))
+		if err != nil {
+			return nil, fmt.Errorf("marshal admin photo index %q: %w", photo.ID, err)
+		}
+		requests = append(requests, putRequest(canonicalItem), putRequest(indexItem))
 	}
 
 	return requests, nil

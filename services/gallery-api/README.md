@@ -14,9 +14,9 @@ curl http://localhost:8080/health
 ## Bootstrap DynamoDB metadata
 
 The command below uses the current AWS CLI/SDK identity to write the
-deterministic placeholder records. It overwrites those fixed seed keys, so do
-not run it after real administrator-authored records exist unless resetting
-them is intentional.
+deterministic public read models, canonical private records, and administrator
+list indexes. It overwrites those fixed seed keys, so do not run it after real
+administrator-authored records exist unless resetting them is intentional.
 
 ```bash
 GALLERY_METADATA_TABLE=photo-portfolio-prod-gallery-metadata go run ./cmd/seed

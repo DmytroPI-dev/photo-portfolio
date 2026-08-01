@@ -2,7 +2,9 @@
 //
 // It is deliberately separate from the public Lambda: the Lambda has read-only
 // permissions, while this command is run locally with a human AWS identity
-// during bootstrap. Re-running it overwrites only the fixed placeholder keys.
+// during bootstrap. Re-running it overwrites only the fixed placeholder and
+// canonical seed keys; never use it after real administrator edits unless a
+// deliberate reset is intended.
 package main
 
 import (

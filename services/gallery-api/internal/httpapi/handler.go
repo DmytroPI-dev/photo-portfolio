@@ -125,6 +125,13 @@ func (handler *Handler) photo(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 
+	handler.writePhoto(writer, request, id)
+}
+
+// writePhoto keeps public and protected detail routes on the same repository
+// lookup path. Route-specific handlers parse their own prefixes before calling
+// it, avoiding accidental treatment of /admin/photos/{id} as a public URL.
+func (handler *Handler) writePhoto(writer http.ResponseWriter, request *http.Request, id string) {
 	photo, found, err := handler.repository.GetPhotoByID(request.Context(), id)
 	if err != nil {
 		writeRepositoryError(writer, err)
@@ -192,7 +199,17 @@ func (handler *Handler) adminPhotos(writer http.ResponseWriter, request *http.Re
 }
 
 func (handler *Handler) adminPhoto(writer http.ResponseWriter, request *http.Request) {
-	handler.photo(writer, request)
+	if !requireGet(writer, request) {
+		return
+	}
+
+	id := strings.TrimPrefix(request.URL.Path, "/admin/photos/")
+	if id == "" || strings.Contains(id, "/") {
+		writeError(writer, http.StatusNotFound, "not_found", "photo not found")
+		return
+	}
+
+	handler.writePhoto(writer, request, id)
 }
 
 func (handler *Handler) withCORS(next http.Handler) http.Handler {

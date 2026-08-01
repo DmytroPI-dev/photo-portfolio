@@ -48,16 +48,17 @@ func TestDynamoRepositoryGetsPhotoByID(t *testing.T) {
 	}
 }
 
-func TestSeedWriteRequestsContainAllPublicReadModels(t *testing.T) {
+func TestSeedWriteRequestsContainPublicAndCanonicalReadModels(t *testing.T) {
 	requests, err := SeedWriteRequests()
 	if err != nil {
 		t.Fatalf("SeedWriteRequests returned error: %v", err)
 	}
 
-	// Three collections have two records each; sixteen photos have two records
-	// each. A count change here forces an intentional review of the data model.
-	if len(requests) != 38 {
-		t.Fatalf("request count = %d, want 38", len(requests))
+	// Each collection and photo has two public copies plus a canonical record
+	// and an administrator-list index copy. A count change forces an explicit
+	// review of this intentional denormalization.
+	if len(requests) != 76 {
+		t.Fatalf("request count = %d, want 76", len(requests))
 	}
 
 	keys := make(map[string]bool, len(requests))
@@ -71,10 +72,36 @@ func TestSeedWriteRequestsContainAllPublicReadModels(t *testing.T) {
 		"COLLECTION#nature|META",
 		"COLLECTION#travel|PHOTO#0016#travel-05",
 		"PHOTO#drawing-01|META",
+		"COLLECTION#drawings|ADMIN",
+		"PHOTO#drawing-01|ADMIN",
+		"ADMIN#COLLECTIONS|COLLECTION#0001#drawings",
+		"ADMIN#PHOTOS|PHOTO#drawings#0001#drawing-01",
 	} {
 		if !keys[expected] {
 			t.Errorf("seed records do not include %s", expected)
 		}
+	}
+}
+
+func TestDynamoRepositoryReadsCanonicalAdminRecords(t *testing.T) {
+	photo := AdminPhoto{
+		Photo:            Photo{ID: "drawing-01", Title: "Stillness", CollectionID: "drawings", Order: 1},
+		Status:           PublicationDraft,
+		ProcessingStatus: ProcessingPending,
+		AltText:          "A drawing of a bird",
+	}
+	client := &dynamoStub{getOutput: &dynamodb.GetItemOutput{Item: marshalTestItem(t, photo, photoPartition(photo.ID), canonicalAdminSortKey)}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	actual, found, err := repository.GetAdminPhotoByID(context.Background(), photo.ID)
+	if err != nil {
+		t.Fatalf("GetAdminPhotoByID returned error: %v", err)
+	}
+	if !found || actual.Status != PublicationDraft || actual.ProcessingStatus != ProcessingPending || actual.AltText != photo.AltText {
+		t.Fatalf("admin photo = %#v, found = %t, want canonical private metadata", actual, found)
+	}
+	if got := attributeString(t, client.getInput.Key["SK"]); got != canonicalAdminSortKey {
+		t.Fatalf("admin photo SK = %q, want %q", got, canonicalAdminSortKey)
 	}
 }
 

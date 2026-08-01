@@ -106,6 +106,19 @@ func TestAdminReadsExposeTheExpectedCollectionAndPhotoShapes(t *testing.T) {
 	}
 }
 
+func TestAdminPhotoDetailUsesItsOwnRoutePrefix(t *testing.T) {
+	response := request(t, http.MethodGet, "/admin/photos/drawing-01")
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var photo gallery.Photo
+	decodeJSON(t, response, &photo)
+	if photo.ID != "drawing-01" || photo.Title != "Stillness" {
+		t.Fatalf("photo = %#v, want drawing-01 Stillness", photo)
+	}
+}
+
 func TestUnknownResourceReturnsJSONNotFound(t *testing.T) {
 	response := request(t, http.MethodGet, "/collections/missing")
 
