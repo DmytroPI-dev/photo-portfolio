@@ -106,6 +106,58 @@ func TestDynamoRepositoryReadsCanonicalAdminRecords(t *testing.T) {
 	}
 }
 
+func TestDynamoRepositoryListsAdminPhotosForOneCollection(t *testing.T) {
+	photo := AdminPhoto{
+		Photo:  Photo{ID: "drawing-01", CollectionID: "drawings", Order: 1},
+		Status: PublicationDraft,
+	}
+	client := &dynamoStub{queryOutput: &dynamodb.QueryOutput{Items: []map[string]types.AttributeValue{
+		marshalTestItem(t, photo, adminPhotosPartition, "PHOTO#drawings#0001#drawing-01"),
+	}}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	photos, err := repository.ListAdminPhotosByCollection(context.Background(), "drawings")
+	if err != nil {
+		t.Fatalf("ListAdminPhotosByCollection returned error: %v", err)
+	}
+	if len(photos) != 1 || photos[0].ID != "drawing-01" {
+		t.Fatalf("photos = %#v, want drawing-01", photos)
+	}
+	if got := attributeString(t, client.queryInput.ExpressionAttributeValues[":skPrefix"]); got != "PHOTO#drawings#" {
+		t.Fatalf("query sort prefix = %q, want drawings prefix", got)
+	}
+}
+
+func TestDynamoRepositoryPaginatesAdminPhotosForOneCollection(t *testing.T) {
+	firstPhoto := AdminPhoto{Photo: Photo{ID: "drawing-01", CollectionID: "drawings", Order: 1}, Status: PublicationDraft}
+	secondPhoto := AdminPhoto{Photo: Photo{ID: "drawing-02", CollectionID: "drawings", Order: 2}, Status: PublicationPublished}
+	lastEvaluatedKey := key(adminPhotosPartition, "PHOTO#drawings#0001#drawing-01")
+	client := &dynamoStub{queryOutputs: []*dynamodb.QueryOutput{
+		{
+			Items:            []map[string]types.AttributeValue{marshalTestItem(t, firstPhoto, adminPhotosPartition, "PHOTO#drawings#0001#drawing-01")},
+			LastEvaluatedKey: lastEvaluatedKey,
+		},
+		{
+			Items: []map[string]types.AttributeValue{marshalTestItem(t, secondPhoto, adminPhotosPartition, "PHOTO#drawings#0002#drawing-02")},
+		},
+	}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	photos, err := repository.ListAdminPhotosByCollection(context.Background(), "drawings")
+	if err != nil {
+		t.Fatalf("ListAdminPhotosByCollection returned error: %v", err)
+	}
+	if len(photos) != 2 || photos[1].ID != "drawing-02" {
+		t.Fatalf("photos = %#v, want both paginated photos", photos)
+	}
+	if len(client.queryInputs) != 2 {
+		t.Fatalf("query count = %d, want 2", len(client.queryInputs))
+	}
+	if got := attributeString(t, client.queryInputs[1].ExclusiveStartKey["SK"]); got != "PHOTO#drawings#0001#drawing-01" {
+		t.Fatalf("second query start key = %q, want first page key", got)
+	}
+}
+
 func TestDynamoRepositoryCreatesDraftCollectionWithoutPublicCopies(t *testing.T) {
 	collection := AdminCollection{
 		Collection: Collection{ID: "sketches", Slug: "sketches", Title: "Sketches", Order: 4},
@@ -192,6 +244,92 @@ func TestDynamoRepositoryUpdatesPublishedCollectionAndPublicCopies(t *testing.T)
 	}
 }
 
+func TestDynamoRepositoryReconcilesPublicCopiesForPublicationStateTransitions(t *testing.T) {
+	t.Run("publishes a draft", func(t *testing.T) {
+		previous := AdminCollection{
+			Collection: Collection{ID: "sketches", Slug: "sketches", Title: "Sketches", Order: 4},
+			Status:     PublicationDraft,
+			Version:    1,
+		}
+		next := previous
+		next.Status = PublicationPublished
+		next.Version = 2
+
+		client := &dynamoStub{transactWriteOutput: &dynamodb.TransactWriteItemsOutput{}}
+		repository := NewDynamoRepository(client, "gallery-metadata")
+		if err := repository.UpdateAdminCollection(context.Background(), previous, next); err != nil {
+			t.Fatalf("UpdateAdminCollection returned error: %v", err)
+		}
+
+		items := client.transactWriteInput.TransactItems
+		if len(items) != 4 {
+			t.Fatalf("transaction items = %d, want canonical, admin index, and two public copies", len(items))
+		}
+		if items[2].Put == nil || attributeString(t, items[2].Put.Item["SK"]) != metadataSortKey {
+			t.Fatalf("third item = %#v, want public metadata put", items[2])
+		}
+		if items[3].Put == nil || attributeString(t, items[3].Put.Item["PK"]) != collectionsPartition {
+			t.Fatalf("fourth item = %#v, want public index put", items[3])
+		}
+	})
+
+	t.Run("archives a published collection", func(t *testing.T) {
+		previous := AdminCollection{
+			Collection: Collection{ID: "sketches", Slug: "sketches", Title: "Sketches", Order: 4},
+			Status:     PublicationPublished,
+			Version:    2,
+		}
+		next := previous
+		next.Status = PublicationArchived
+		next.Version = 3
+
+		client := &dynamoStub{transactWriteOutput: &dynamodb.TransactWriteItemsOutput{}}
+		repository := NewDynamoRepository(client, "gallery-metadata")
+		if err := repository.UpdateAdminCollection(context.Background(), previous, next); err != nil {
+			t.Fatalf("UpdateAdminCollection returned error: %v", err)
+		}
+
+		items := client.transactWriteInput.TransactItems
+		if len(items) != 4 {
+			t.Fatalf("transaction items = %d, want canonical, admin index, and two public deletes", len(items))
+		}
+		if items[2].Delete == nil || attributeString(t, items[2].Delete.Key["SK"]) != metadataSortKey {
+			t.Fatalf("third item = %#v, want public metadata delete", items[2])
+		}
+		if items[3].Delete == nil || attributeString(t, items[3].Delete.Key["PK"]) != collectionsPartition {
+			t.Fatalf("fourth item = %#v, want public index delete", items[3])
+		}
+	})
+}
+
+func TestDynamoRepositoryDeletesArchivedCollectionWithVersionCondition(t *testing.T) {
+	collection := AdminCollection{
+		Collection: Collection{ID: "sketches", Slug: "sketches", Title: "Sketches", Order: 4},
+		Status:     PublicationArchived,
+		Version:    3,
+	}
+	client := &dynamoStub{transactWriteOutput: &dynamodb.TransactWriteItemsOutput{}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	if err := repository.DeleteAdminCollection(context.Background(), collection); err != nil {
+		t.Fatalf("DeleteAdminCollection returned error: %v", err)
+	}
+	items := client.transactWriteInput.TransactItems
+	if len(items) != 2 || items[0].Delete == nil || items[1].Delete == nil {
+		t.Fatalf("transaction items = %#v, want canonical and index deletes", items)
+	}
+	canonical := items[0].Delete
+	if got := attributeString(t, canonical.Key["PK"]); got != "COLLECTION#sketches" {
+		t.Fatalf("canonical delete PK = %q, want COLLECTION#sketches", got)
+	}
+	if got := canonical.ExpressionAttributeNames["#version"]; got != "Version" {
+		t.Fatalf("version attribute = %q, want Version", got)
+	}
+	if got := attributeNumber(t, canonical.ExpressionAttributeValues[":version"]); got != "3" {
+		t.Fatalf("version condition = %q, want 3", got)
+	}
+}
+
 type dynamoStub struct {
 	getInput            *dynamodb.GetItemInput
 	getOutput           *dynamodb.GetItemOutput
@@ -199,6 +337,8 @@ type dynamoStub struct {
 	queryInput          *dynamodb.QueryInput
 	queryOutput         *dynamodb.QueryOutput
 	queryErr            error
+	queryInputs         []*dynamodb.QueryInput
+	queryOutputs        []*dynamodb.QueryOutput
 	transactWriteInput  *dynamodb.TransactWriteItemsInput
 	transactWriteOutput *dynamodb.TransactWriteItemsOutput
 	transactWriteErr    error
@@ -211,6 +351,10 @@ func (stub *dynamoStub) GetItem(_ context.Context, input *dynamodb.GetItemInput,
 
 func (stub *dynamoStub) Query(_ context.Context, input *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
 	stub.queryInput = input
+	stub.queryInputs = append(stub.queryInputs, input)
+	if queryIndex := len(stub.queryInputs) - 1; queryIndex < len(stub.queryOutputs) {
+		return stub.queryOutputs[queryIndex], nil
+	}
 	return stub.queryOutput, stub.queryErr
 }
 
@@ -237,4 +381,13 @@ func attributeString(t *testing.T, value types.AttributeValue) string {
 		t.Fatalf("attribute value = %#v, want string", value)
 	}
 	return stringValue.Value
+}
+
+func attributeNumber(t *testing.T, value types.AttributeValue) string {
+	t.Helper()
+	numberValue, ok := value.(*types.AttributeValueMemberN)
+	if !ok {
+		t.Fatalf("attribute value = %#v, want number", value)
+	}
+	return numberValue.Value
 }

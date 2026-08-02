@@ -30,8 +30,12 @@ type Repository interface {
 type AdminCollectionRepository interface {
 	ListAdminCollections(ctx context.Context) ([]AdminCollection, error)
 	GetAdminCollectionByID(ctx context.Context, id string) (AdminCollection, bool, error)
+	// ListAdminPhotosByCollection checks canonical photo ownership. Lifecycle
+	// actions use it instead of public copies so drafts cannot be orphaned.
+	ListAdminPhotosByCollection(ctx context.Context, collectionID string) ([]AdminPhoto, error)
 	CreateAdminCollection(ctx context.Context, collection AdminCollection) error
 	UpdateAdminCollection(ctx context.Context, previous, next AdminCollection) error
+	DeleteAdminCollection(ctx context.Context, collection AdminCollection) error
 }
 
 type MemoryRepository struct {
@@ -39,6 +43,7 @@ type MemoryRepository struct {
 	collectionsBySlug map[string]Collection
 	photos            []Photo
 	photosByID        map[string]Photo
+	adminPhotos       []AdminPhoto
 	adminCollections  []AdminCollection
 	adminByID         map[string]AdminCollection
 }
@@ -49,6 +54,7 @@ func NewMemoryRepository(collections []Collection, photos []Photo) *MemoryReposi
 		collectionsBySlug: make(map[string]Collection, len(collections)),
 		photos:            append([]Photo(nil), photos...),
 		photosByID:        make(map[string]Photo, len(photos)),
+		adminPhotos:       make([]AdminPhoto, 0, len(photos)),
 		adminCollections:  make([]AdminCollection, 0, len(collections)),
 		adminByID:         make(map[string]AdminCollection, len(collections)),
 	}
@@ -70,6 +76,14 @@ func NewMemoryRepository(collections []Collection, photos []Photo) *MemoryReposi
 	}
 	for _, photo := range repository.photos {
 		repository.photosByID[photo.ID] = photo
+		repository.adminPhotos = append(repository.adminPhotos, AdminPhoto{
+			Photo:            photo,
+			Status:           PublicationPublished,
+			ProcessingStatus: ProcessingNotRequired,
+			AltText:          photo.Title,
+			Tags:             []string{},
+			Version:          1,
+		})
 	}
 
 	return repository
@@ -112,6 +126,16 @@ func (repository *MemoryRepository) GetAdminCollectionByID(_ context.Context, id
 	return collection, found, nil
 }
 
+func (repository *MemoryRepository) ListAdminPhotosByCollection(_ context.Context, collectionID string) ([]AdminPhoto, error) {
+	photos := make([]AdminPhoto, 0)
+	for _, photo := range repository.adminPhotos {
+		if photo.CollectionID == collectionID {
+			photos = append(photos, photo)
+		}
+	}
+	return photos, nil
+}
+
 func (repository *MemoryRepository) CreateAdminCollection(_ context.Context, collection AdminCollection) error {
 	if _, found := repository.adminByID[collection.ID]; found {
 		return ErrAlreadyExists
@@ -134,7 +158,19 @@ func (repository *MemoryRepository) UpdateAdminCollection(_ context.Context, pre
 		}
 	}
 	repository.adminByID[next.ID] = next
-	if current.Status == PublicationPublished {
+
+	wasPublished := current.Status == PublicationPublished
+	isPublished := next.Status == PublicationPublished
+	switch {
+	case wasPublished && !isPublished:
+		repository.removePublicCollection(current.Collection)
+	case !wasPublished && isPublished:
+		repository.collections = append(repository.collections, next.Collection)
+		sort.Slice(repository.collections, func(left, right int) bool {
+			return repository.collections[left].Order < repository.collections[right].Order
+		})
+		repository.collectionsBySlug[next.Slug] = next.Collection
+	case wasPublished && isPublished:
 		for index, collection := range repository.collections {
 			if collection.ID == previous.ID {
 				repository.collections[index] = next.Collection
@@ -144,4 +180,30 @@ func (repository *MemoryRepository) UpdateAdminCollection(_ context.Context, pre
 		repository.collectionsBySlug[next.Slug] = next.Collection
 	}
 	return nil
+}
+
+func (repository *MemoryRepository) DeleteAdminCollection(_ context.Context, collection AdminCollection) error {
+	current, found := repository.adminByID[collection.ID]
+	if !found || current.Version != collection.Version {
+		return ErrVersionConflict
+	}
+
+	for index, candidate := range repository.adminCollections {
+		if candidate.ID == collection.ID {
+			repository.adminCollections = append(repository.adminCollections[:index], repository.adminCollections[index+1:]...)
+			break
+		}
+	}
+	delete(repository.adminByID, collection.ID)
+	return nil
+}
+
+func (repository *MemoryRepository) removePublicCollection(collection Collection) {
+	for index, current := range repository.collections {
+		if current.ID == collection.ID {
+			repository.collections = append(repository.collections[:index], repository.collections[index+1:]...)
+			break
+		}
+	}
+	delete(repository.collectionsBySlug, collection.Slug)
 }

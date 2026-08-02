@@ -69,6 +69,30 @@ export const GalleryApi = (apiBaseUrl, getAccessToken) => {
       });
     },
 
+    publishCollection: (id, version) =>
+      request(`/admin/collections/${encodeURIComponent(id)}/publish`, {
+        method: "POST",
+        body: { version },
+      }),
+
+    archiveCollection: (id, version) =>
+      request(`/admin/collections/${encodeURIComponent(id)}/archive`, {
+        method: "POST",
+        body: { version },
+      }),
+
+    restoreCollection: (id, version) =>
+      request(`/admin/collections/${encodeURIComponent(id)}/restore`, {
+        method: "POST",
+        body: { version },
+      }),
+
+    deleteCollection: (id, version, confirmationSlug) =>
+      request(`/admin/collections/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        body: { version, confirmationSlug },
+      }),
+
     async listPhotos() {
       const response = await request("/admin/photos");
       return response.items;

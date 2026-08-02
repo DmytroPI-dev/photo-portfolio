@@ -10,7 +10,7 @@ resource "aws_apigatewayv2_api" "gallery" {
   cors_configuration {
     allow_credentials = false
     allow_headers     = ["authorization", "content-type"]
-    allow_methods     = ["GET", "POST", "PATCH", "OPTIONS"]
+    allow_methods     = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
     allow_origins     = var.allowed_cors_origins
     max_age           = 3600
   }
@@ -85,6 +85,46 @@ resource "aws_apigatewayv2_route" "admin_collection_write" {
   authorization_type   = "JWT"
   authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
   authorization_scopes = ["gallery/write"]
+}
+
+resource "aws_apigatewayv2_route" "admin_collection_publish" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "POST /admin/collections/{id}/publish"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/publish"]
+}
+
+resource "aws_apigatewayv2_route" "admin_collection_archive" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "POST /admin/collections/{id}/archive"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/publish"]
+}
+
+# Restoring returns an archived collection to a private draft. It cannot make a
+# collection public; publication remains a separate, deliberate action.
+resource "aws_apigatewayv2_route" "admin_collection_restore" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "POST /admin/collections/{id}/restore"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/publish"]
+}
+
+# Permanent deletion is intentionally a publish-level lifecycle action. The Go
+# handler only permits an archived, empty collection after an exact-slug check.
+resource "aws_apigatewayv2_route" "admin_collection_delete" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "DELETE /admin/collections/{id}"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/publish"]
 }
 
 resource "aws_apigatewayv2_route" "admin_photos" {

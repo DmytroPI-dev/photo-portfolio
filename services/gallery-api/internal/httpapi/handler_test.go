@@ -150,6 +150,130 @@ func TestAdminCollectionsCreateDraftAndEditWithVersion(t *testing.T) {
 	}
 }
 
+func TestAdminCollectionPublishesDraftAndArchivesEmptyCollection(t *testing.T) {
+	handler := NewHandler(gallery.NewSeedRepository())
+
+	created := requestWithHandler(t, handler, http.MethodPost, "/admin/collections", `{"slug":"sketches","title":"Sketches","order":4}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d; body = %s", created.Code, http.StatusCreated, created.Body.String())
+	}
+
+	published := requestWithHandler(t, handler, http.MethodPost, "/admin/collections/sketches/publish", `{"version":1}`)
+	if published.Code != http.StatusOK {
+		t.Fatalf("publish status = %d, want %d; body = %s", published.Code, http.StatusOK, published.Body.String())
+	}
+	var collection gallery.AdminCollection
+	decodeJSON(t, published, &collection)
+	if collection.Status != gallery.PublicationPublished || collection.Version != 2 {
+		t.Fatalf("published collection = %#v, want published version 2", collection)
+	}
+
+	publicDetail := requestWithHandler(t, handler, http.MethodGet, "/collections/sketches", "")
+	if publicDetail.Code != http.StatusOK {
+		t.Fatalf("public detail status = %d, want %d; body = %s", publicDetail.Code, http.StatusOK, publicDetail.Body.String())
+	}
+
+	archived := requestWithHandler(t, handler, http.MethodPost, "/admin/collections/sketches/archive", `{"version":2}`)
+	if archived.Code != http.StatusOK {
+		t.Fatalf("archive status = %d, want %d; body = %s", archived.Code, http.StatusOK, archived.Body.String())
+	}
+	decodeJSON(t, archived, &collection)
+	if collection.Status != gallery.PublicationArchived || collection.Version != 3 {
+		t.Fatalf("archived collection = %#v, want archived version 3", collection)
+	}
+
+	publicDetail = requestWithHandler(t, handler, http.MethodGet, "/collections/sketches", "")
+	if publicDetail.Code != http.StatusNotFound {
+		t.Fatalf("archived public detail status = %d, want %d", publicDetail.Code, http.StatusNotFound)
+	}
+}
+
+func TestAdminCollectionCannotArchiveWithPublishedPhotos(t *testing.T) {
+	handler := NewHandler(gallery.NewSeedRepository())
+	response := requestWithHandler(t, handler, http.MethodPost, "/admin/collections/drawings/archive", `{"version":1}`)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("archive status = %d, want %d; body = %s", response.Code, http.StatusConflict, response.Body.String())
+	}
+
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	decodeJSON(t, response, &body)
+	if body.Error.Code != "collection_has_published_photos" {
+		t.Fatalf("error code = %q, want collection_has_published_photos", body.Error.Code)
+	}
+}
+
+func TestArchivedCollectionIsReadOnlyAndCanBePermanentlyDeletedWithConfirmation(t *testing.T) {
+	handler := NewHandler(gallery.NewSeedRepository())
+
+	created := requestWithHandler(t, handler, http.MethodPost, "/admin/collections", `{"slug":"sketches","title":"Sketches","order":4}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d; body = %s", created.Code, http.StatusCreated, created.Body.String())
+	}
+
+	archived := requestWithHandler(t, handler, http.MethodPost, "/admin/collections/sketches/archive", `{"version":1}`)
+	if archived.Code != http.StatusOK {
+		t.Fatalf("archive status = %d, want %d; body = %s", archived.Code, http.StatusOK, archived.Body.String())
+	}
+
+	update := requestWithHandler(t, handler, http.MethodPatch, "/admin/collections/sketches", `{"title":"Changed after archive","version":2}`)
+	if update.Code != http.StatusConflict {
+		t.Fatalf("update archived status = %d, want %d; body = %s", update.Code, http.StatusConflict, update.Body.String())
+	}
+	assertErrorCode(t, update, "archived_collection_read_only")
+
+	restored := requestWithHandler(t, handler, http.MethodPost, "/admin/collections/sketches/restore", `{"version":2}`)
+	if restored.Code != http.StatusOK {
+		t.Fatalf("restore status = %d, want %d; body = %s", restored.Code, http.StatusOK, restored.Body.String())
+	}
+	var restoredCollection gallery.AdminCollection
+	decodeJSON(t, restored, &restoredCollection)
+	if restoredCollection.Status != gallery.PublicationDraft || restoredCollection.Version != 3 {
+		t.Fatalf("restored collection = %#v, want draft version 3", restoredCollection)
+	}
+
+	publicDetail := requestWithHandler(t, handler, http.MethodGet, "/collections/sketches", "")
+	if publicDetail.Code != http.StatusNotFound {
+		t.Fatalf("restored draft public detail status = %d, want %d", publicDetail.Code, http.StatusNotFound)
+	}
+
+	restoreDraft := requestWithHandler(t, handler, http.MethodPost, "/admin/collections/sketches/restore", `{"version":3}`)
+	if restoreDraft.Code != http.StatusConflict {
+		t.Fatalf("restore draft status = %d, want %d; body = %s", restoreDraft.Code, http.StatusConflict, restoreDraft.Body.String())
+	}
+	assertErrorCode(t, restoreDraft, "invalid_state")
+
+	archivedAgain := requestWithHandler(t, handler, http.MethodPost, "/admin/collections/sketches/archive", `{"version":3}`)
+	if archivedAgain.Code != http.StatusOK {
+		t.Fatalf("archive restored draft status = %d, want %d; body = %s", archivedAgain.Code, http.StatusOK, archivedAgain.Body.String())
+	}
+
+	notArchived := requestWithHandler(t, handler, http.MethodDelete, "/admin/collections/drawings", `{"version":1,"confirmationSlug":"drawings"}`)
+	if notArchived.Code != http.StatusConflict {
+		t.Fatalf("delete published status = %d, want %d; body = %s", notArchived.Code, http.StatusConflict, notArchived.Body.String())
+	}
+	assertErrorCode(t, notArchived, "collection_not_archived")
+
+	wrongConfirmation := requestWithHandler(t, handler, http.MethodDelete, "/admin/collections/sketches", `{"version":4,"confirmationSlug":"wrong"}`)
+	if wrongConfirmation.Code != http.StatusBadRequest {
+		t.Fatalf("delete wrong confirmation status = %d, want %d; body = %s", wrongConfirmation.Code, http.StatusBadRequest, wrongConfirmation.Body.String())
+	}
+	assertErrorCode(t, wrongConfirmation, "invalid_confirmation")
+
+	deleted := requestWithHandler(t, handler, http.MethodDelete, "/admin/collections/sketches", `{"version":4,"confirmationSlug":"sketches"}`)
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want %d; body = %s", deleted.Code, http.StatusNoContent, deleted.Body.String())
+	}
+
+	detail := requestWithHandler(t, handler, http.MethodGet, "/admin/collections/sketches", "")
+	if detail.Code != http.StatusNotFound {
+		t.Fatalf("deleted admin detail status = %d, want %d", detail.Code, http.StatusNotFound)
+	}
+}
+
 func TestAdminCollectionRejectsMultipleJSONValues(t *testing.T) {
 	handler := NewHandler(gallery.NewSeedRepository())
 	request := httptest.NewRequest(http.MethodPost, "/admin/collections", strings.NewReader("{\"slug\":\"sketches\",\"title\":\"Sketches\",\"order\":4}\n{\"slug\":\"ignored\"}"))
@@ -169,15 +293,7 @@ func TestUnknownResourceReturnsJSONNotFound(t *testing.T) {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusNotFound)
 	}
 
-	var body struct {
-		Error struct {
-			Code string `json:"code"`
-		} `json:"error"`
-	}
-	decodeJSON(t, response, &body)
-	if body.Error.Code != "not_found" {
-		t.Fatalf("error code = %q, want not_found", body.Error.Code)
-	}
+	assertErrorCode(t, response, "not_found")
 }
 
 func TestOptionsAllowsLocalViteOrigin(t *testing.T) {
@@ -197,15 +313,36 @@ func TestOptionsAllowsLocalViteOrigin(t *testing.T) {
 	if headers := response.Header().Get("Access-Control-Allow-Headers"); headers != "Authorization, Content-Type" {
 		t.Fatalf("CORS headers = %q, want Authorization and Content-Type", headers)
 	}
-	if methods := response.Header().Get("Access-Control-Allow-Methods"); methods != "GET, POST, PATCH, OPTIONS" {
-		t.Fatalf("CORS methods = %q, want GET, POST, PATCH, OPTIONS", methods)
+	if methods := response.Header().Get("Access-Control-Allow-Methods"); methods != "GET, POST, PATCH, DELETE, OPTIONS" {
+		t.Fatalf("CORS methods = %q, want GET, POST, PATCH, DELETE, OPTIONS", methods)
+	}
+}
+
+func assertErrorCode(t *testing.T, response *httptest.ResponseRecorder, want string) {
+	t.Helper()
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	decodeJSON(t, response, &body)
+	if body.Error.Code != want {
+		t.Fatalf("error code = %q, want %q", body.Error.Code, want)
 	}
 }
 
 func request(t *testing.T, method, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	handler := NewHandler(gallery.NewSeedRepository())
-	request := httptest.NewRequest(method, path, nil)
+	return requestWithHandler(t, handler, method, path, "")
+}
+
+func requestWithHandler(t *testing.T, handler http.Handler, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(method, path, strings.NewReader(body))
+	if body != "" {
+		request.Header.Set("Content-Type", "application/json")
+	}
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	return response
