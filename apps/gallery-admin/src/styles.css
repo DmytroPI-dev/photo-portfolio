@@ -1,0 +1,21 @@
+html,
+body,
+#root {
+  min-height: 100vh;
+  margin: 0;
+}
+
+body {
+  background: #2c3436;
+}
+
+/* OAuth routes intentionally render outside the protected console router so
+   Cognito's one-time authorization code is handled before session checks. */
+.auth-status {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: #151515;
+  color: #ece9e2;
+}

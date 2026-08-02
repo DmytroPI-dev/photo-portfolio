@@ -1,0 +1,222 @@
+package httpapi
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/gallery"
+)
+
+func TestHealth(t *testing.T) {
+	response := request(t, http.MethodGet, "/health")
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var body map[string]string
+	decodeJSON(t, response, &body)
+	if body["status"] != "ok" {
+		t.Fatalf("status body = %q, want ok", body["status"])
+	}
+}
+
+func TestListCollectionsUsesDisplayOrder(t *testing.T) {
+	response := request(t, http.MethodGet, "/collections")
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Items []gallery.Collection `json:"items"`
+	}
+	decodeJSON(t, response, &body)
+
+	if len(body.Items) != 3 {
+		t.Fatalf("collection count = %d, want 3", len(body.Items))
+	}
+	if body.Items[0].Slug != "drawings" || body.Items[2].Slug != "travel" {
+		t.Fatalf("collection order = %#v, want drawings through travel", body.Items)
+	}
+}
+
+func TestGetCollectionIncludesOnlyItsOrderedPhotos(t *testing.T) {
+	response := request(t, http.MethodGet, "/collections/nature")
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var body gallery.CollectionDetail
+	decodeJSON(t, response, &body)
+
+	if body.ID != "nature" {
+		t.Fatalf("collection ID = %q, want nature", body.ID)
+	}
+	if len(body.Photos) != 5 {
+		t.Fatalf("photo count = %d, want 5", len(body.Photos))
+	}
+	if body.Photos[0].ID != "nature-01" || body.Photos[4].ID != "nature-05" {
+		t.Fatalf("unexpected photo order: %#v", body.Photos)
+	}
+}
+
+func TestGetPhoto(t *testing.T) {
+	response := request(t, http.MethodGet, "/photos/drawing-01")
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var body gallery.Photo
+	decodeJSON(t, response, &body)
+	if body.Title != "Stillness" || body.Src != "/images/1.jpg" {
+		t.Fatalf("photo = %#v, want Stillness with its source path", body)
+	}
+}
+
+func TestAdminReadsExposeTheExpectedCollectionAndPhotoShapes(t *testing.T) {
+	collectionsResponse := request(t, http.MethodGet, "/admin/collections")
+	if collectionsResponse.Code != http.StatusOK {
+		t.Fatalf("collection status = %d, want %d", collectionsResponse.Code, http.StatusOK)
+	}
+
+	var collections struct {
+		Items []gallery.Collection `json:"items"`
+	}
+	decodeJSON(t, collectionsResponse, &collections)
+	if len(collections.Items) != 3 || collections.Items[0].ID != "drawings" {
+		t.Fatalf("admin collections = %#v, want seeded collections", collections.Items)
+	}
+
+	photosResponse := request(t, http.MethodGet, "/admin/photos")
+	if photosResponse.Code != http.StatusOK {
+		t.Fatalf("photo status = %d, want %d", photosResponse.Code, http.StatusOK)
+	}
+
+	var photos struct {
+		Items []gallery.Photo `json:"items"`
+	}
+	decodeJSON(t, photosResponse, &photos)
+	if len(photos.Items) != 16 || photos.Items[0].ID != "drawing-01" || photos.Items[15].ID != "travel-05" {
+		t.Fatalf("admin photos = %#v, want all seeded photos in display order", photos.Items)
+	}
+}
+
+func TestAdminPhotoDetailUsesItsOwnRoutePrefix(t *testing.T) {
+	response := request(t, http.MethodGet, "/admin/photos/drawing-01")
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var photo gallery.Photo
+	decodeJSON(t, response, &photo)
+	if photo.ID != "drawing-01" || photo.Title != "Stillness" {
+		t.Fatalf("photo = %#v, want drawing-01 Stillness", photo)
+	}
+}
+
+func TestAdminCollectionsCreateDraftAndEditWithVersion(t *testing.T) {
+	handler := NewHandler(gallery.NewSeedRepository())
+	create := httptest.NewRequest(http.MethodPost, "/admin/collections", strings.NewReader(`{"slug":"sketches","title":"Sketches","description":"First studies.","order":4}`))
+	create.Header.Set("Content-Type", "application/json")
+	created := httptest.NewRecorder()
+	handler.ServeHTTP(created, create)
+
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want %d; body = %s", created.Code, http.StatusCreated, created.Body.String())
+	}
+
+	var collection gallery.AdminCollection
+	decodeJSON(t, created, &collection)
+	if collection.Status != gallery.PublicationDraft || collection.Version != 1 || collection.ID != "sketches" {
+		t.Fatalf("created collection = %#v, want draft sketches version 1", collection)
+	}
+
+	update := httptest.NewRequest(http.MethodPatch, "/admin/collections/sketches", strings.NewReader(`{"title":"Field Sketches","version":1}`))
+	update.Header.Set("Content-Type", "application/json")
+	updated := httptest.NewRecorder()
+	handler.ServeHTTP(updated, update)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want %d; body = %s", updated.Code, http.StatusOK, updated.Body.String())
+	}
+	decodeJSON(t, updated, &collection)
+	if collection.Title != "Field Sketches" || collection.Version != 2 {
+		t.Fatalf("updated collection = %#v, want title and version 2", collection)
+	}
+}
+
+func TestAdminCollectionRejectsMultipleJSONValues(t *testing.T) {
+	handler := NewHandler(gallery.NewSeedRepository())
+	request := httptest.NewRequest(http.MethodPost, "/admin/collections", strings.NewReader("{\"slug\":\"sketches\",\"title\":\"Sketches\",\"order\":4}\n{\"slug\":\"ignored\"}"))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusBadRequest, response.Body.String())
+	}
+}
+
+func TestUnknownResourceReturnsJSONNotFound(t *testing.T) {
+	response := request(t, http.MethodGet, "/collections/missing")
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNotFound)
+	}
+
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	decodeJSON(t, response, &body)
+	if body.Error.Code != "not_found" {
+		t.Fatalf("error code = %q, want not_found", body.Error.Code)
+	}
+}
+
+func TestOptionsAllowsLocalViteOrigin(t *testing.T) {
+	handler := NewHandler(gallery.NewSeedRepository())
+	request := httptest.NewRequest(http.MethodOptions, "/collections", nil)
+	request.Header.Set("Origin", "http://localhost:5173")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNoContent)
+	}
+	if origin := response.Header().Get("Access-Control-Allow-Origin"); origin != "http://localhost:5173" {
+		t.Fatalf("CORS origin = %q, want local Vite origin", origin)
+	}
+	if headers := response.Header().Get("Access-Control-Allow-Headers"); headers != "Authorization, Content-Type" {
+		t.Fatalf("CORS headers = %q, want Authorization and Content-Type", headers)
+	}
+	if methods := response.Header().Get("Access-Control-Allow-Methods"); methods != "GET, POST, PATCH, OPTIONS" {
+		t.Fatalf("CORS methods = %q, want GET, POST, PATCH, OPTIONS", methods)
+	}
+}
+
+func request(t *testing.T, method, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	handler := NewHandler(gallery.NewSeedRepository())
+	request := httptest.NewRequest(method, path, nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+func decodeJSON(t *testing.T, response *httptest.ResponseRecorder, target any) {
+	t.Helper()
+	if contentType := response.Header().Get("Content-Type"); contentType != "application/json; charset=utf-8" {
+		t.Fatalf("content type = %q, want JSON", contentType)
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), target); err != nil {
+		t.Fatalf("decode JSON: %v", err)
+	}
+}

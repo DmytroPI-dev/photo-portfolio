@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars locally. This file is intentionally ignored because
+# notification addresses are personal operational contact information.
+billing_alert_email = "you@example.com"
+service_anomaly_monitor_arn = "arn:aws:ce::ACCOUNT_ID:anomalymonitor/MONITOR_ID"
