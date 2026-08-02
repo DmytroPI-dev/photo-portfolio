@@ -198,6 +198,32 @@ func (repository *DynamoRepository) ListAdminPhotos(ctx context.Context) ([]Admi
 	return photos, nil
 }
 
+// ListAdminPhotosByCollection uses the private ordered index to protect
+// collection lifecycle operations from leaving draft or archived photos behind.
+func (repository *DynamoRepository) ListAdminPhotosByCollection(ctx context.Context, collectionID string) ([]AdminPhoto, error) {
+	output, err := repository.client.Query(ctx, &dynamodb.QueryInput{
+		TableName:              aws.String(repository.table),
+		KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :skPrefix)"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":pk":       &types.AttributeValueMemberS{Value: adminPhotosPartition},
+			":skPrefix": &types.AttributeValueMemberS{Value: "PHOTO#" + collectionID + "#"},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("query admin photos for collection %q: %w", collectionID, err)
+	}
+
+	photos := make([]AdminPhoto, 0, len(output.Items))
+	for _, item := range output.Items {
+		var photo AdminPhoto
+		if err := attributevalue.UnmarshalMap(item, &photo); err != nil {
+			return nil, fmt.Errorf("decode admin collection photo: %w", err)
+		}
+		photos = append(photos, photo)
+	}
+	return photos, nil
+}
+
 // GetAdminPhotoByID resolves the canonical photo record, including metadata
 // that is intentionally absent from the public gallery response.
 func (repository *DynamoRepository) GetAdminPhotoByID(ctx context.Context, id string) (AdminPhoto, bool, error) {
@@ -243,8 +269,8 @@ func (repository *DynamoRepository) CreateAdminCollection(ctx context.Context, c
 
 // UpdateAdminCollection replaces the canonical document and its ordered index
 // atomically. A version condition prevents two browser tabs from silently
-// overwriting each other's metadata. Published collections update their two
-// public copies in the same transaction; drafts have no public copies yet.
+// overwriting each other's metadata. The same transaction reconciles public
+// copies whenever a collection enters or leaves the published state.
 func (repository *DynamoRepository) UpdateAdminCollection(ctx context.Context, previous, next AdminCollection) error {
 	canonicalItem, err := marshalItem(next, collectionPartition(next.ID), canonicalAdminSortKey)
 	if err != nil {
@@ -281,7 +307,25 @@ func (repository *DynamoRepository) UpdateAdminCollection(ctx context.Context, p
 	}
 	items = append(items, putItem(repository.table, newIndexItem))
 
-	if previous.Status == PublicationPublished {
+	wasPublished := previous.Status == PublicationPublished
+	isPublished := next.Status == PublicationPublished
+	switch {
+	case wasPublished && !isPublished:
+		items = append(items,
+			deleteItem(repository.table, key(collectionPartition(previous.ID), metadataSortKey)),
+			deleteItem(repository.table, key(collectionsPartition, publicCollectionIndexSortKey(previous.Collection))),
+		)
+	case !wasPublished && isPublished:
+		publicMetadata, err := marshalItem(next.Collection, collectionPartition(next.ID), metadataSortKey)
+		if err != nil {
+			return fmt.Errorf("marshal public collection %q: %w", next.ID, err)
+		}
+		publicIndex, err := marshalItem(next.Collection, collectionsPartition, publicCollectionIndexSortKey(next.Collection))
+		if err != nil {
+			return fmt.Errorf("marshal public collection index %q: %w", next.ID, err)
+		}
+		items = append(items, putItem(repository.table, publicMetadata), putItem(repository.table, publicIndex))
+	case wasPublished && isPublished:
 		publicMetadata, err := marshalItem(next.Collection, collectionPartition(next.ID), metadataSortKey)
 		if err != nil {
 			return fmt.Errorf("marshal public collection %q: %w", next.ID, err)
@@ -301,6 +345,22 @@ func (repository *DynamoRepository) UpdateAdminCollection(ctx context.Context, p
 
 	_, err = repository.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: items})
 	return writeError("update admin collection", err, ErrVersionConflict)
+}
+
+// DeleteAdminCollection removes both private copies atomically. The handler
+// guarantees the collection is archived and empty before calling this method;
+// the Version condition still prevents a stale confirmation from deleting a
+// record that another administrator changed in the meantime.
+func (repository *DynamoRepository) DeleteAdminCollection(ctx context.Context, collection AdminCollection) error {
+	_, err := repository.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
+		TransactItems: []types.TransactWriteItem{
+			conditionalDelete(repository.table, key(collectionPartition(collection.ID), canonicalAdminSortKey), "#version = :version", map[string]string{"#version": "Version"}, map[string]types.AttributeValue{
+				":version": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", collection.Version)},
+			}),
+			deleteItem(repository.table, key(adminCollectionsPartition, adminCollectionIndexSortKey(collection))),
+		},
+	})
+	return writeError("delete admin collection", err, ErrVersionConflict)
 }
 
 func adminCollectionIndexSortKey(collection AdminCollection) string {
@@ -325,6 +385,16 @@ func putItem(table string, item map[string]types.AttributeValue) types.TransactW
 
 func deleteItem(table string, itemKey map[string]types.AttributeValue) types.TransactWriteItem {
 	return types.TransactWriteItem{Delete: &types.Delete{TableName: aws.String(table), Key: itemKey}}
+}
+
+func conditionalDelete(table string, itemKey map[string]types.AttributeValue, condition string, names map[string]string, values map[string]types.AttributeValue) types.TransactWriteItem {
+	return types.TransactWriteItem{Delete: &types.Delete{
+		TableName:                 aws.String(table),
+		Key:                       itemKey,
+		ConditionExpression:       aws.String(condition),
+		ExpressionAttributeNames:  names,
+		ExpressionAttributeValues: values,
+	}}
 }
 
 func writeError(operation string, err, conditionFailure error) error {

@@ -181,9 +181,28 @@ func (handler *Handler) adminCollection(writer http.ResponseWriter, request *htt
 		return
 	}
 
-	id := strings.TrimPrefix(request.URL.Path, "/admin/collections/")
-	if id == "" || strings.Contains(id, "/") {
+	path := strings.TrimPrefix(request.URL.Path, "/admin/collections/")
+	parts := strings.Split(path, "/")
+	if len(parts) == 0 || parts[0] == "" || len(parts) > 2 {
 		writeError(writer, http.StatusNotFound, "not_found", "collection not found")
+		return
+	}
+	id := parts[0]
+	if len(parts) == 2 {
+		if request.Method != http.MethodPost {
+			writeMethodNotAllowed(writer, http.MethodPost+", OPTIONS")
+			return
+		}
+		switch parts[1] {
+		case "publish":
+			handler.transitionAdminCollection(writer, request, store, id, gallery.PublicationPublished)
+		case "archive":
+			handler.transitionAdminCollection(writer, request, store, id, gallery.PublicationArchived)
+		case "restore":
+			handler.transitionAdminCollection(writer, request, store, id, gallery.PublicationDraft)
+		default:
+			writeError(writer, http.StatusNotFound, "not_found", "collection action not found")
+		}
 		return
 	}
 
@@ -201,8 +220,10 @@ func (handler *Handler) adminCollection(writer http.ResponseWriter, request *htt
 		writeJSON(writer, http.StatusOK, collection)
 	case http.MethodPatch:
 		handler.updateAdminCollection(writer, request, store, id)
+	case http.MethodDelete:
+		handler.deleteAdminCollection(writer, request, store, id)
 	default:
-		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPatch+", OPTIONS")
+		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPatch+", "+http.MethodDelete+", OPTIONS")
 	}
 }
 
@@ -221,6 +242,21 @@ type updateCollectionRequest struct {
 	CoverPhotoID *string `json:"coverPhotoId"`
 	Order        *int    `json:"order"`
 	Version      *int    `json:"version"`
+}
+
+// Collection state transitions intentionally accept only the version. Metadata
+// belongs on PATCH, while publishing and archiving have separate, auditable
+// domain actions with their own safety checks.
+type collectionTransitionRequest struct {
+	Version int `json:"version"`
+}
+
+// Collection deletion is intentionally more constrained than archiving. The
+// exact slug avoids accidental confirmation, and the handler also verifies the
+// canonical record has no remaining photo ownership before removing metadata.
+type deleteCollectionRequest struct {
+	Version          int    `json:"version"`
+	ConfirmationSlug string `json:"confirmationSlug"`
 }
 
 func (handler *Handler) createAdminCollection(writer http.ResponseWriter, request *http.Request, store gallery.AdminCollectionRepository) {
@@ -278,6 +314,10 @@ func (handler *Handler) updateAdminCollection(writer http.ResponseWriter, reques
 		writeError(writer, http.StatusNotFound, "not_found", "collection not found")
 		return
 	}
+	if current.Status == gallery.PublicationArchived {
+		writeError(writer, http.StatusConflict, "archived_collection_read_only", "archived collections cannot be edited")
+		return
+	}
 	// The first admin-console rollout used a disabled form field for version,
 	// and some browsers submit that as zero. A positive version still enforces
 	// optimistic locking; an omitted or zero legacy value uses this just-read
@@ -318,6 +358,130 @@ func (handler *Handler) updateAdminCollection(writer http.ResponseWriter, reques
 		return
 	}
 	writeJSON(writer, http.StatusOK, next)
+}
+
+func (handler *Handler) transitionAdminCollection(writer http.ResponseWriter, request *http.Request, store gallery.AdminCollectionRepository, id string, target gallery.PublicationStatus) {
+	var input collectionTransitionRequest
+	if !decodeRequestJSON(writer, request, &input) {
+		return
+	}
+	if input.Version < 1 {
+		writeError(writer, http.StatusBadRequest, "invalid_version", "a positive collection version is required")
+		return
+	}
+
+	current, found, err := store.GetAdminCollectionByID(request.Context(), id)
+	if err != nil {
+		writeRepositoryError(writer, err)
+		return
+	}
+	if !found {
+		writeError(writer, http.StatusNotFound, "not_found", "collection not found")
+		return
+	}
+	if input.Version != current.Version {
+		writeError(writer, http.StatusConflict, "version_conflict", "collection was changed by another request; reload and try again")
+		return
+	}
+	if current.Status == target {
+		if target == gallery.PublicationDraft {
+			writeError(writer, http.StatusConflict, "invalid_state", "only archived collections can be restored")
+			return
+		}
+		writeJSON(writer, http.StatusOK, current)
+		return
+	}
+
+	switch target {
+	case gallery.PublicationPublished:
+		if current.Status != gallery.PublicationDraft {
+			writeError(writer, http.StatusConflict, "invalid_state", "only draft collections can be published")
+			return
+		}
+	case gallery.PublicationDraft:
+		if current.Status != gallery.PublicationArchived {
+			writeError(writer, http.StatusConflict, "invalid_state", "only archived collections can be restored")
+			return
+		}
+	case gallery.PublicationArchived:
+		if current.Status != gallery.PublicationDraft && current.Status != gallery.PublicationPublished {
+			writeError(writer, http.StatusConflict, "invalid_state", "collection is already archived")
+			return
+		}
+		if current.Status == gallery.PublicationPublished {
+			photos, err := store.ListAdminPhotosByCollection(request.Context(), current.ID)
+			if err != nil {
+				writeRepositoryError(writer, err)
+				return
+			}
+			for _, photo := range photos {
+				if photo.Status != gallery.PublicationPublished {
+					continue
+				}
+				writeError(writer, http.StatusConflict, "collection_has_published_photos", "archive or move all published photos before archiving this collection")
+				return
+			}
+		}
+	}
+
+	next := current
+	next.Status = target
+	next.Version++
+	next.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	if err := store.UpdateAdminCollection(request.Context(), current, next); err != nil {
+		writeAdminStoreError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, next)
+}
+
+func (handler *Handler) deleteAdminCollection(writer http.ResponseWriter, request *http.Request, store gallery.AdminCollectionRepository, id string) {
+	var input deleteCollectionRequest
+	if !decodeRequestJSON(writer, request, &input) {
+		return
+	}
+	if input.Version < 1 {
+		writeError(writer, http.StatusBadRequest, "invalid_version", "a positive collection version is required")
+		return
+	}
+
+	current, found, err := store.GetAdminCollectionByID(request.Context(), id)
+	if err != nil {
+		writeRepositoryError(writer, err)
+		return
+	}
+	if !found {
+		writeError(writer, http.StatusNotFound, "not_found", "collection not found")
+		return
+	}
+	if input.Version != current.Version {
+		writeError(writer, http.StatusConflict, "version_conflict", "collection was changed by another request; reload and try again")
+		return
+	}
+	if current.Status != gallery.PublicationArchived {
+		writeError(writer, http.StatusConflict, "collection_not_archived", "only archived collections can be permanently deleted")
+		return
+	}
+	if input.ConfirmationSlug != current.Slug {
+		writeError(writer, http.StatusBadRequest, "invalid_confirmation", "type the exact collection slug to confirm deletion")
+		return
+	}
+
+	photos, err := store.ListAdminPhotosByCollection(request.Context(), current.ID)
+	if err != nil {
+		writeRepositoryError(writer, err)
+		return
+	}
+	if len(photos) > 0 {
+		writeError(writer, http.StatusConflict, "collection_has_photos", "move or delete all photos before permanently deleting this collection")
+		return
+	}
+
+	if err := store.DeleteAdminCollection(request.Context(), current); err != nil {
+		writeAdminStoreError(writer, err)
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 // adminPhotos is a temporary authenticated read path over the small seeded
@@ -374,7 +538,7 @@ func (handler *Handler) withCORS(next http.Handler) http.Handler {
 		}
 
 		if request.Method == http.MethodOptions {
-			writer.Header().Set("Access-Control-Allow-Methods", http.MethodGet+", "+http.MethodPost+", "+http.MethodPatch+", OPTIONS")
+			writer.Header().Set("Access-Control-Allow-Methods", http.MethodGet+", "+http.MethodPost+", "+http.MethodPatch+", "+http.MethodDelete+", OPTIONS")
 			writer.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 			writer.WriteHeader(http.StatusNoContent)
 			return

@@ -2,6 +2,7 @@ import { AddIcon, ArrowBackIcon, EditIcon, ViewIcon } from "@chakra-ui/icons";
 import {
   Alert,
   AlertIcon,
+  Badge,
   Box,
   Button,
   Flex,
@@ -26,6 +27,14 @@ import {
   Input,
   NumberInput,
   NumberInputField,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalOverlay,
+  useDisclosure,
 } from "@chakra-ui/react";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -77,6 +86,16 @@ const LoadingState = ({ label = "Loading gallery metadata..." }) => (
     <Text>{label}</Text>
   </Flex>
 );
+
+const CollectionStatus = ({ status }) => {
+  const colorScheme = {
+    draft: "yellow",
+    published: "green",
+    archived: "gray",
+  }[status] || "gray";
+
+  return <Badge colorScheme={colorScheme}>{status}</Badge>;
+};
 
 const ConsoleHeader = ({ user }) => {
   const navigate = useNavigate();
@@ -174,6 +193,7 @@ const CollectionForm = ({
   pending,
   submitLabel,
   slugReadOnly = false,
+  readOnly = false,
 }) => {
   const [form, setForm] = useState(initialValue);
 
@@ -189,7 +209,9 @@ const CollectionForm = ({
       as="form"
       onSubmit={(event) => {
         event.preventDefault();
-        onSubmit(form);
+        if (!readOnly) {
+          onSubmit(form);
+        }
       }}
     >
       <Stack spacing={5} maxW="680px">
@@ -198,6 +220,7 @@ const CollectionForm = ({
           <Input
             value={form.title}
             onChange={change("title")}
+            isReadOnly={readOnly}
             autoComplete="off"
           />
         </FormControl>
@@ -220,6 +243,7 @@ const CollectionForm = ({
           <Textarea
             value={form.description}
             onChange={change("description")}
+            isReadOnly={readOnly}
             rows={4}
             resize="vertical"
           />
@@ -229,6 +253,7 @@ const CollectionForm = ({
           <Input
             value={form.coverPhotoId}
             onChange={change("coverPhotoId")}
+            isReadOnly={readOnly}
             autoComplete="off"
           />
         </FormControl>
@@ -237,6 +262,7 @@ const CollectionForm = ({
           <NumberInput
             min={1}
             value={form.order}
+            isReadOnly={readOnly}
             onChange={(value) =>
               setForm((current) => ({ ...current, order: value }))
             }
@@ -244,7 +270,7 @@ const CollectionForm = ({
             <NumberInputField />
           </NumberInput>
         </FormControl>
-        <HStack pt={2}>
+        {!readOnly ? <HStack pt={2}>
           <Button
             type="submit"
             colorScheme="yellow"
@@ -256,9 +282,73 @@ const CollectionForm = ({
           <Button as={RouterLink} to="/collections" variant="solid" colorScheme="green">
             Cancel
           </Button>
-        </HStack>
+        </HStack> : null}
       </Stack>
     </Box>
+  );
+};
+
+const DeleteCollectionControl = ({ collection, pending, onDelete }) => {
+  const { isOpen, onOpen, onClose } = useDisclosure();
+  const [confirmation, setConfirmation] = useState("");
+  const confirmed = confirmation === collection.slug;
+
+  const close = () => {
+    setConfirmation("");
+    onClose();
+  };
+
+  const remove = async () => {
+    const deleted = await onDelete(confirmation);
+    if (deleted) {
+      close();
+    }
+  };
+
+  return (
+    <>
+      <Button colorScheme="red" onClick={onOpen} isLoading={pending}>
+        Delete
+      </Button>
+      <Modal isOpen={isOpen} onClose={close} isCentered>
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader
+          color="red.500"
+          >Delete collection</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <Text
+            color="black"
+            >
+              This permanently removes the archived collection metadata. Type
+              <Text as="span" fontWeight="bold"> {collection.slug}</Text> to confirm.
+            </Text>
+            <Input
+              mt={4}
+              value={confirmation}
+              color={confirmed ? "green.500" : "red.500"}
+              onChange={(event) => setConfirmation(event.target.value)}
+              autoComplete="off"
+              aria-label="Collection slug confirmation"
+            />
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" mr={3} onClick={close}>
+              Cancel
+            </Button>
+            <Button
+              colorScheme="red"
+              onClick={remove}
+              isDisabled={!confirmed || pending}
+              isLoading={pending}
+            >
+              Permanently delete
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+    </>
   );
 };
 
@@ -334,6 +424,7 @@ const CollectionsPage = ({ api }) => {
                 <Th>Order</Th>
                 <Th>Title</Th>
                 <Th>Slug</Th>
+                <Th>Status</Th>
                 <Th>Cover photo</Th>
                 <Th aria-label="Actions" />
               </Tr>
@@ -344,6 +435,7 @@ const CollectionsPage = ({ api }) => {
                   <Td>{collection.order}</Td>
                   <Td fontWeight="semibold">{collection.title}</Td>
                   <Td color="whiteAlpha.700">{collection.slug}</Td>
+                  <Td><CollectionStatus status={collection.status} /></Td>
                   <Td color="whiteAlpha.700">
                     {collection.coverPhotoId || "-"}
                   </Td>
@@ -416,6 +508,7 @@ const CollectionEditPage = ({ api }) => {
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const toast = useToast();
+  const navigate = useNavigate();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -446,21 +539,73 @@ const CollectionEditPage = ({ api }) => {
         isClosable: true,
       });
     } catch (reason) {
-      if (
-        reason instanceof GalleryApiError &&
-        reason.code === "version_conflict"
-      ) {
-        toast({
-          title: "Collection changed elsewhere",
-          description: "The latest server version has been loaded.",
-          status: "warning",
-          duration: 5000,
-          isClosable: true,
-        });
-        await load();
-      } else {
-        setError(reason);
-      }
+      await handleMutationError(reason);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const handleMutationError = async (reason) => {
+    if (
+      reason instanceof GalleryApiError &&
+      reason.code === "version_conflict"
+    ) {
+      toast({
+        title: "Collection changed elsewhere",
+        description: "The latest server version has been loaded.",
+        status: "warning",
+        duration: 5000,
+        isClosable: true,
+      });
+      await load();
+    } else {
+      setError(reason);
+    }
+  };
+
+  const transition = async (action) => {
+    setPending(true);
+    setError(null);
+    try {
+      const updated = action === "publish"
+        ? await api.publishCollection(id, collection.version)
+        : action === "archive"
+          ? await api.archiveCollection(id, collection.version)
+          : await api.restoreCollection(id, collection.version);
+      setCollection(updated);
+      toast({
+        title: action === "publish"
+          ? "Collection published"
+          : action === "archive"
+            ? "Collection archived"
+            : "Collection restored as draft",
+        status: "success",
+        duration: 3000,
+        isClosable: true,
+      });
+    } catch (reason) {
+      await handleMutationError(reason);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const remove = async (confirmationSlug) => {
+    setPending(true);
+    setError(null);
+    try {
+      await api.deleteCollection(id, collection.version, confirmationSlug);
+      toast({
+        title: "Collection permanently deleted",
+        status: "success",
+        duration: 3000,
+        isClosable: true,
+      });
+      navigate("/collections", { replace: true });
+      return true;
+    } catch (reason) {
+      await handleMutationError(reason);
+      return false;
     } finally {
       setPending(false);
     }
@@ -472,7 +617,10 @@ const CollectionEditPage = ({ api }) => {
         <LoadingState />
       </Page>
     );
-  if (error || !collection)
+  // A failed save or lifecycle action should leave the loaded collection on
+  // screen. The alert appears above the form, while the back control and the
+  // current metadata stay available for the administrator to recover.
+  if (!collection)
     return (
       <Page>
         <ErrorNotice error={error} />
@@ -481,22 +629,55 @@ const CollectionEditPage = ({ api }) => {
 
   return (
     <Page>
-      <HStack spacing={3} mb={7}>
-        <IconButton
-          as={RouterLink}
-          to="/collections"
-          aria-label="Back to collections"
-          icon={<ArrowBackIcon />}
-          variant="solid"
-          colorScheme="yellow"
-        />
-        <Box>
-          <Heading size="lg">Edit collection</Heading>
-          <Text mt={1} color="whiteAlpha.600">
-            Version {collection.version}
-          </Text>
-        </Box>
-      </HStack>
+      <Flex
+        justify="space-between"
+        align={{ base: "flex-start", sm: "center" }}
+        gap={4}
+        mb={7}
+        direction={{ base: "column", sm: "row" }}
+      >
+        <HStack spacing={3}>
+          <IconButton
+            as={RouterLink}
+            to="/collections"
+            aria-label="Back to collections"
+            icon={<ArrowBackIcon />}
+            variant="solid"
+            colorScheme="yellow"
+          />
+          <Box>
+            <Heading size="lg">Edit collection</Heading>
+            <HStack mt={1} spacing={3}>
+              <CollectionStatus status={collection.status} />
+              <Text color="whiteAlpha.600">Version {collection.version}</Text>
+            </HStack>
+          </Box>
+        </HStack>
+        <HStack>
+          {collection.status === "draft" ? (
+            <Button colorScheme="green" onClick={() => transition("publish")} isLoading={pending}>
+              Publish
+            </Button>
+          ) : null}
+          {collection.status === "draft" || collection.status === "published" ? (
+            <Button colorScheme="orange" onClick={() => transition("archive")} isLoading={pending}>
+              Archive
+            </Button>
+          ) : null}
+          {collection.status === "archived" ? (
+            <>
+              <Button colorScheme="blue" onClick={() => transition("restore")} isLoading={pending}>
+                Restore
+              </Button>
+              <DeleteCollectionControl
+                collection={collection}
+                pending={pending}
+                onDelete={remove}
+              />
+            </>
+          ) : null}
+        </HStack>
+      </Flex>
       <ErrorNotice error={error} />
       <CollectionForm
         initialValue={collection}
@@ -504,6 +685,7 @@ const CollectionEditPage = ({ api }) => {
         pending={pending}
         submitLabel="Save changes"
         slugReadOnly
+        readOnly={collection.status === "archived"}
       />
     </Page>
   );
