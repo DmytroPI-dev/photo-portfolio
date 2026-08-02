@@ -22,4 +22,6 @@ administrator-authored records exist unless resetting them is intentional.
 GALLERY_METADATA_TABLE=photo-portfolio-prod-gallery-metadata go run ./cmd/seed
 ```
 
-The public Lambda remains read-only; this command is the only Phase 1 writer.
+Public gallery routes remain read-only. The deployed Lambda also serves
+authenticated `/admin/*` routes, which may create and update metadata; this
+command is for deterministic bootstrap or intentional resets.

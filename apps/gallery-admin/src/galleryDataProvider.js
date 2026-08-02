@@ -11,13 +11,13 @@ export class GalleryApiError extends Error {
   }
 }
 
-const collectionPayload = (data, includeSlug, version) => ({
+const collectionPayload = (data, includeSlug) => ({
   ...(includeSlug ? { slug: data.slug.trim() } : {}),
   title: data.title.trim(),
   description: data.description.trim(),
   coverPhotoId: data.coverPhotoId.trim(),
   order: Number(data.order),
-  ...(includeSlug ? {} : { version }),
+  ...(includeSlug ? {} : { version: data.version }),
 });
 
 export const GalleryApi = (apiBaseUrl, getAccessToken) => {
@@ -61,13 +61,11 @@ export const GalleryApi = (apiBaseUrl, getAccessToken) => {
       }),
 
     async updateCollection(id, data) {
-      // Fetch immediately before mutation. The server still performs an atomic
-      // conditional write, so a real concurrent update returns version_conflict
-      // instead of silently overwriting another administrator's change.
-      const current = await request(`/admin/collections/${encodeURIComponent(id)}`);
+      // Use the version captured with the edit form so a concurrent save is
+      // rejected by the server instead of silently overwriting newer changes.
       return request(`/admin/collections/${encodeURIComponent(id)}`, {
         method: "PATCH",
-        body: collectionPayload(data, false, current.version),
+        body: collectionPayload(data, false),
       });
     },
 

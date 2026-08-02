@@ -150,6 +150,18 @@ func TestAdminCollectionsCreateDraftAndEditWithVersion(t *testing.T) {
 	}
 }
 
+func TestAdminCollectionRejectsMultipleJSONValues(t *testing.T) {
+	handler := NewHandler(gallery.NewSeedRepository())
+	request := httptest.NewRequest(http.MethodPost, "/admin/collections", strings.NewReader("{\"slug\":\"sketches\",\"title\":\"Sketches\",\"order\":4}\n{\"slug\":\"ignored\"}"))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusBadRequest, response.Body.String())
+	}
+}
+
 func TestUnknownResourceReturnsJSONNotFound(t *testing.T) {
 	response := request(t, http.MethodGet, "/collections/missing")
 

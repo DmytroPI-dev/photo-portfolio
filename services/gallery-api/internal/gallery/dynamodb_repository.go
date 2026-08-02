@@ -238,7 +238,7 @@ func (repository *DynamoRepository) CreateAdminCollection(ctx context.Context, c
 			conditionalPut(repository.table, indexItem, "attribute_not_exists(PK)"),
 		},
 	})
-	return writeError("create admin collection", err)
+	return writeError("create admin collection", err, ErrAlreadyExists)
 }
 
 // UpdateAdminCollection replaces the canonical document and its ordered index
@@ -300,7 +300,7 @@ func (repository *DynamoRepository) UpdateAdminCollection(ctx context.Context, p
 	}
 
 	_, err = repository.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: items})
-	return writeError("update admin collection", err)
+	return writeError("update admin collection", err, ErrVersionConflict)
 }
 
 func adminCollectionIndexSortKey(collection AdminCollection) string {
@@ -327,16 +327,25 @@ func deleteItem(table string, itemKey map[string]types.AttributeValue) types.Tra
 	return types.TransactWriteItem{Delete: &types.Delete{TableName: aws.String(table), Key: itemKey}}
 }
 
-func writeError(operation string, err error) error {
+func writeError(operation string, err, conditionFailure error) error {
 	if err == nil {
 		return nil
 	}
 
 	var cancelled *types.TransactionCanceledException
-	if errors.As(err, &cancelled) {
-		return ErrVersionConflict
+	if errors.As(err, &cancelled) && hasConditionalCheckFailure(cancelled) {
+		return conditionFailure
 	}
 	return fmt.Errorf("%s: %w", operation, err)
+}
+
+func hasConditionalCheckFailure(cancelled *types.TransactionCanceledException) bool {
+	for _, reason := range cancelled.CancellationReasons {
+		if aws.ToString(reason.Code) == "ConditionalCheckFailed" {
+			return true
+		}
+	}
+	return false
 }
 
 func key(partition, sort string) map[string]types.AttributeValue {

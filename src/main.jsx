@@ -9,14 +9,9 @@ if (!rootElement) {
   throw new Error("Photo portfolio could not find its root element.");
 }
 
-// Vite can evaluate this entry more than once during development. Check if
-// React has already created a root on this element (_reactRootContainer).
-// Only create a new root if one doesn't already exist.
-let root = rootElement._reactRootContainer;
-
-if (!root) {
-  root = ReactDOM.createRoot(rootElement);
-}
+// Vite may re-evaluate this module during HMR. Keep the actual React root in
+// a stable application-owned location rather than a React-internal DOM field.
+const root = window.__photoPortfolioRoot || (window.__photoPortfolioRoot = ReactDOM.createRoot(rootElement));
 
 root.render(
   <React.StrictMode>

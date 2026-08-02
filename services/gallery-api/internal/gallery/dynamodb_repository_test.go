@@ -2,6 +2,7 @@ package gallery
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -131,6 +132,29 @@ func TestDynamoRepositoryCreatesDraftCollectionWithoutPublicCopies(t *testing.T)
 	}
 	if got := attributeString(t, index.Item["PK"]); got != adminCollectionsPartition {
 		t.Fatalf("index PK = %q, want %s", got, adminCollectionsPartition)
+	}
+}
+
+func TestDynamoRepositoryClassifiesConditionalTransactionFailuresByOperation(t *testing.T) {
+	cancellation := &types.TransactionCanceledException{
+		CancellationReasons: []types.CancellationReason{{Code: aws.String("ConditionalCheckFailed")}},
+	}
+
+	if err := writeError("create admin collection", cancellation, ErrAlreadyExists); !errors.Is(err, ErrAlreadyExists) {
+		t.Fatalf("create error = %v, want ErrAlreadyExists", err)
+	}
+	if err := writeError("update admin collection", cancellation, ErrVersionConflict); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("update error = %v, want ErrVersionConflict", err)
+	}
+}
+
+func TestDynamoRepositoryPreservesOtherTransactionCancellationErrors(t *testing.T) {
+	cancellation := &types.TransactionCanceledException{
+		CancellationReasons: []types.CancellationReason{{Code: aws.String("TransactionConflict")}},
+	}
+	err := writeError("update admin collection", cancellation, ErrVersionConflict)
+	if !errors.Is(err, cancellation) {
+		t.Fatalf("error = %v, want original transaction cancellation", err)
 	}
 }
 

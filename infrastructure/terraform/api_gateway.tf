@@ -62,7 +62,7 @@ resource "aws_apigatewayv2_route" "admin_collections" {
 
 resource "aws_apigatewayv2_route" "admin_collection" {
   api_id               = aws_apigatewayv2_api.gallery.id
-  route_key            = "GET /admin/collections/{slug}"
+  route_key            = "GET /admin/collections/{id}"
   target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
   authorization_type   = "JWT"
   authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id

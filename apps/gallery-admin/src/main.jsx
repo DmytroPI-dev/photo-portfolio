@@ -25,7 +25,7 @@ const theme = extendTheme({
 const SessionGate = () => {
   const location = useLocation();
   const [user, setUser] = useState(undefined);
-  const api = useMemo(() => GalleryApi(apiUrl, getAccessToken), []);
+  const api = useMemo(() => GalleryApi(apiUrl, getAccessToken), [apiUrl]);
 
   useEffect(() => {
     let alive = true;
