@@ -128,6 +128,36 @@ func TestDynamoRepositoryListsAdminPhotosForOneCollection(t *testing.T) {
 	}
 }
 
+func TestDynamoRepositoryPaginatesAdminPhotosForOneCollection(t *testing.T) {
+	firstPhoto := AdminPhoto{Photo: Photo{ID: "drawing-01", CollectionID: "drawings", Order: 1}, Status: PublicationDraft}
+	secondPhoto := AdminPhoto{Photo: Photo{ID: "drawing-02", CollectionID: "drawings", Order: 2}, Status: PublicationPublished}
+	lastEvaluatedKey := key(adminPhotosPartition, "PHOTO#drawings#0001#drawing-01")
+	client := &dynamoStub{queryOutputs: []*dynamodb.QueryOutput{
+		{
+			Items:            []map[string]types.AttributeValue{marshalTestItem(t, firstPhoto, adminPhotosPartition, "PHOTO#drawings#0001#drawing-01")},
+			LastEvaluatedKey: lastEvaluatedKey,
+		},
+		{
+			Items: []map[string]types.AttributeValue{marshalTestItem(t, secondPhoto, adminPhotosPartition, "PHOTO#drawings#0002#drawing-02")},
+		},
+	}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	photos, err := repository.ListAdminPhotosByCollection(context.Background(), "drawings")
+	if err != nil {
+		t.Fatalf("ListAdminPhotosByCollection returned error: %v", err)
+	}
+	if len(photos) != 2 || photos[1].ID != "drawing-02" {
+		t.Fatalf("photos = %#v, want both paginated photos", photos)
+	}
+	if len(client.queryInputs) != 2 {
+		t.Fatalf("query count = %d, want 2", len(client.queryInputs))
+	}
+	if got := attributeString(t, client.queryInputs[1].ExclusiveStartKey["SK"]); got != "PHOTO#drawings#0001#drawing-01" {
+		t.Fatalf("second query start key = %q, want first page key", got)
+	}
+}
+
 func TestDynamoRepositoryCreatesDraftCollectionWithoutPublicCopies(t *testing.T) {
 	collection := AdminCollection{
 		Collection: Collection{ID: "sketches", Slug: "sketches", Title: "Sketches", Order: 4},
@@ -307,6 +337,8 @@ type dynamoStub struct {
 	queryInput          *dynamodb.QueryInput
 	queryOutput         *dynamodb.QueryOutput
 	queryErr            error
+	queryInputs         []*dynamodb.QueryInput
+	queryOutputs        []*dynamodb.QueryOutput
 	transactWriteInput  *dynamodb.TransactWriteItemsInput
 	transactWriteOutput *dynamodb.TransactWriteItemsOutput
 	transactWriteErr    error
@@ -319,6 +351,10 @@ func (stub *dynamoStub) GetItem(_ context.Context, input *dynamodb.GetItemInput,
 
 func (stub *dynamoStub) Query(_ context.Context, input *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
 	stub.queryInput = input
+	stub.queryInputs = append(stub.queryInputs, input)
+	if queryIndex := len(stub.queryInputs) - 1; queryIndex < len(stub.queryOutputs) {
+		return stub.queryOutputs[queryIndex], nil
+	}
 	return stub.queryOutput, stub.queryErr
 }
 

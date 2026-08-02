@@ -201,27 +201,35 @@ func (repository *DynamoRepository) ListAdminPhotos(ctx context.Context) ([]Admi
 // ListAdminPhotosByCollection uses the private ordered index to protect
 // collection lifecycle operations from leaving draft or archived photos behind.
 func (repository *DynamoRepository) ListAdminPhotosByCollection(ctx context.Context, collectionID string) ([]AdminPhoto, error) {
-	output, err := repository.client.Query(ctx, &dynamodb.QueryInput{
-		TableName:              aws.String(repository.table),
-		KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :skPrefix)"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":pk":       &types.AttributeValueMemberS{Value: adminPhotosPartition},
-			":skPrefix": &types.AttributeValueMemberS{Value: "PHOTO#" + collectionID + "#"},
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("query admin photos for collection %q: %w", collectionID, err)
-	}
-
-	photos := make([]AdminPhoto, 0, len(output.Items))
-	for _, item := range output.Items {
-		var photo AdminPhoto
-		if err := attributevalue.UnmarshalMap(item, &photo); err != nil {
-			return nil, fmt.Errorf("decode admin collection photo: %w", err)
+	photos := make([]AdminPhoto, 0)
+	var startKey map[string]types.AttributeValue
+	for {
+		output, err := repository.client.Query(ctx, &dynamodb.QueryInput{
+			TableName:              aws.String(repository.table),
+			KeyConditionExpression: aws.String("PK = :pk AND begins_with(SK, :skPrefix)"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":pk":       &types.AttributeValueMemberS{Value: adminPhotosPartition},
+				":skPrefix": &types.AttributeValueMemberS{Value: "PHOTO#" + collectionID + "#"},
+			},
+			ExclusiveStartKey: startKey,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("query admin photos for collection %q: %w", collectionID, err)
 		}
-		photos = append(photos, photo)
+
+		for _, item := range output.Items {
+			var photo AdminPhoto
+			if err := attributevalue.UnmarshalMap(item, &photo); err != nil {
+				return nil, fmt.Errorf("decode admin collection photo: %w", err)
+			}
+			photos = append(photos, photo)
+		}
+
+		if len(output.LastEvaluatedKey) == 0 {
+			return photos, nil
+		}
+		startKey = output.LastEvaluatedKey
 	}
-	return photos, nil
 }
 
 // GetAdminPhotoByID resolves the canonical photo record, including metadata
