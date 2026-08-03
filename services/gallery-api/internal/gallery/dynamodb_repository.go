@@ -176,26 +176,33 @@ func (repository *DynamoRepository) GetAdminCollectionByID(ctx context.Context, 
 // photos, including drafts and archived work. Its sort key groups photos by
 // collection and preserves each collection's display order.
 func (repository *DynamoRepository) ListAdminPhotos(ctx context.Context) ([]AdminPhoto, error) {
-	output, err := repository.client.Query(ctx, &dynamodb.QueryInput{
-		TableName:              aws.String(repository.table),
-		KeyConditionExpression: aws.String("PK = :pk"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":pk": &types.AttributeValueMemberS{Value: adminPhotosPartition},
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("query admin photo index: %w", err)
-	}
-
-	photos := make([]AdminPhoto, 0, len(output.Items))
-	for _, item := range output.Items {
-		var photo AdminPhoto
-		if err := attributevalue.UnmarshalMap(item, &photo); err != nil {
-			return nil, fmt.Errorf("decode admin photo index item: %w", err)
+	photos := make([]AdminPhoto, 0)
+	var startKey map[string]types.AttributeValue
+	for {
+		output, err := repository.client.Query(ctx, &dynamodb.QueryInput{
+			TableName:              aws.String(repository.table),
+			KeyConditionExpression: aws.String("PK = :pk"),
+			ExpressionAttributeValues: map[string]types.AttributeValue{
+				":pk": &types.AttributeValueMemberS{Value: adminPhotosPartition},
+			},
+			ExclusiveStartKey: startKey,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("query admin photo index: %w", err)
 		}
-		photos = append(photos, photo)
+
+		for _, item := range output.Items {
+			var photo AdminPhoto
+			if err := attributevalue.UnmarshalMap(item, &photo); err != nil {
+				return nil, fmt.Errorf("decode admin photo index item: %w", err)
+			}
+			photos = append(photos, photo)
+		}
+		if len(output.LastEvaluatedKey) == 0 {
+			return photos, nil
+		}
+		startKey = output.LastEvaluatedKey
 	}
-	return photos, nil
 }
 
 // ListAdminPhotosByCollection uses the private ordered index to protect
@@ -403,14 +410,25 @@ func (repository *DynamoRepository) UpdateAdminPhoto(ctx context.Context, previo
 	return writeError("update admin photo", err, ErrVersionConflict)
 }
 
-// ReorderAdminPhotos updates one collection atomically. A published photo can
-// need six writes when its order changes, so the handler caps a reorder at
-// sixteen records and remains below DynamoDB's 100-item transaction limit.
+func (repository *DynamoRepository) UpdateAdminPhotoForPublishedCollection(ctx context.Context, previous, next AdminPhoto, collection AdminCollection) error {
+	items, err := repository.adminPhotoUpdateItems(previous, next)
+	if err != nil {
+		return err
+	}
+	items = append(items, conditionalPublishedCollection(repository.table, collection))
+	_, err = repository.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: items})
+	return writeError("update admin photo", err, ErrVersionConflict)
+}
+
+// ReorderAdminPhotos updates photos in transactions no larger than DynamoDB's
+// 100-item limit. Each photo remains conditionally versioned, so callers can
+// safely retry after a concurrent edit instead of being limited by collection
+// size.
 func (repository *DynamoRepository) ReorderAdminPhotos(ctx context.Context, previous, next []AdminPhoto) error {
 	if len(previous) != len(next) {
 		return ErrVersionConflict
 	}
-	items := make([]types.TransactWriteItem, 0, len(previous)*6)
+	items := make([]types.TransactWriteItem, 0, 100)
 	for index, photo := range previous {
 		if photo.ID != next[index].ID {
 			return ErrVersionConflict
@@ -419,7 +437,16 @@ func (repository *DynamoRepository) ReorderAdminPhotos(ctx context.Context, prev
 		if err != nil {
 			return err
 		}
+		if len(items)+len(photoItems) > 100 {
+			if _, err := repository.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: items}); err != nil {
+				return writeError("reorder admin photos", err, ErrVersionConflict)
+			}
+			items = make([]types.TransactWriteItem, 0, 100)
+		}
 		items = append(items, photoItems...)
+	}
+	if len(items) == 0 {
+		return nil
 	}
 	_, err := repository.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: items})
 	return writeError("reorder admin photos", err, ErrVersionConflict)
@@ -520,6 +547,22 @@ func conditionalPutWithVersion(table string, item map[string]types.AttributeValu
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":version": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", version)},
+		},
+	}}
+}
+
+func conditionalPublishedCollection(table string, collection AdminCollection) types.TransactWriteItem {
+	return types.TransactWriteItem{ConditionCheck: &types.ConditionCheck{
+		TableName:           aws.String(table),
+		Key:                 key(collectionPartition(collection.ID), canonicalAdminSortKey),
+		ConditionExpression: aws.String("#status = :published AND #version = :version"),
+		ExpressionAttributeNames: map[string]string{
+			"#status":  "Status",
+			"#version": "Version",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":published": &types.AttributeValueMemberS{Value: string(PublicationPublished)},
+			":version":   &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", collection.Version)},
 		},
 	}}
 }

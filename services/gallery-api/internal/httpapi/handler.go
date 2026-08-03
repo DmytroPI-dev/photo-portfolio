@@ -634,9 +634,10 @@ type createUploadRequest struct {
 }
 
 type createUploadResponse struct {
-	PhotoID     string `json:"photoId"`
-	OriginalKey string `json:"originalKey"`
-	UploadURL   string `json:"uploadUrl"`
+	PhotoID      string            `json:"photoId"`
+	OriginalKey  string            `json:"originalKey"`
+	UploadURL    string            `json:"uploadUrl"`
+	UploadFields map[string]string `json:"uploadFields"`
 }
 
 func (handler *Handler) createUpload(writer http.ResponseWriter, request *http.Request) {
@@ -666,13 +667,13 @@ func (handler *Handler) createUpload(writer http.ResponseWriter, request *http.R
 		return
 	}
 	originalKey := "originals/" + photoID + "/original" + extension
-	uploadURL, err := handler.originals.PresignPut(request.Context(), originalKey, contentType)
+	upload, err := handler.originals.PresignUpload(request.Context(), originalKey, contentType, maxOriginalUploadBytes)
 	if err != nil {
 		log.Printf("presign upload for %q: %v", photoID, err)
 		writeError(writer, http.StatusInternalServerError, "internal_error", "unable to prepare image upload")
 		return
 	}
-	writeJSON(writer, http.StatusCreated, createUploadResponse{PhotoID: photoID, OriginalKey: originalKey, UploadURL: uploadURL})
+	writeJSON(writer, http.StatusCreated, createUploadResponse{PhotoID: photoID, OriginalKey: originalKey, UploadURL: upload.URL, UploadFields: upload.Fields})
 }
 
 func (handler *Handler) adminPhotoPreview(writer http.ResponseWriter, request *http.Request, store gallery.AdminPhotoRepository, id string) {
@@ -809,8 +810,7 @@ func (handler *Handler) updateAdminPhoto(writer http.ResponseWriter, request *ht
 	}
 	next.Version++
 	next.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	if err := store.UpdateAdminPhoto(request.Context(), current, next); err != nil {
-		writePhotoStoreError(writer, err)
+	if !handler.saveAdminPhoto(writer, request, store, current, next) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, next)
@@ -873,11 +873,41 @@ func (handler *Handler) transitionAdminPhoto(writer http.ResponseWriter, request
 	next.Status = target
 	next.Version++
 	next.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	if err := store.UpdateAdminPhoto(request.Context(), current, next); err != nil {
-		writePhotoStoreError(writer, err)
+	if !handler.saveAdminPhoto(writer, request, store, current, next) {
 		return
 	}
 	writeJSON(writer, http.StatusOK, next)
+}
+
+func (handler *Handler) saveAdminPhoto(writer http.ResponseWriter, request *http.Request, store gallery.AdminPhotoRepository, previous, next gallery.AdminPhoto) bool {
+	if next.Status == gallery.PublicationPublished {
+		collections, ok := handler.repository.(gallery.AdminCollectionRepository)
+		if !ok {
+			writeError(writer, http.StatusNotImplemented, "admin_not_configured", "administrator metadata is not configured")
+			return false
+		}
+		collection, found, err := collections.GetAdminCollectionByID(request.Context(), next.CollectionID)
+		if err != nil {
+			writeRepositoryError(writer, err)
+			return false
+		}
+		if !found || collection.Status != gallery.PublicationPublished {
+			writeError(writer, http.StatusConflict, "collection_not_published", "publish the collection before publishing this photo")
+			return false
+		}
+		if guardedStore, ok := store.(gallery.AdminPhotoCollectionGuardRepository); ok {
+			if err := guardedStore.UpdateAdminPhotoForPublishedCollection(request.Context(), previous, next, collection); err != nil {
+				writePhotoStoreError(writer, err)
+				return false
+			}
+			return true
+		}
+	}
+	if err := store.UpdateAdminPhoto(request.Context(), previous, next); err != nil {
+		writePhotoStoreError(writer, err)
+		return false
+	}
+	return true
 }
 
 func (handler *Handler) reorderAdminPhotos(writer http.ResponseWriter, request *http.Request) {
@@ -895,8 +925,8 @@ func (handler *Handler) reorderAdminPhotos(writer http.ResponseWriter, request *
 		return
 	}
 	input.CollectionID = strings.TrimSpace(input.CollectionID)
-	if input.CollectionID == "" || len(input.Photos) == 0 || len(input.Photos) > 16 {
-		writeError(writer, http.StatusBadRequest, "invalid_reorder", "a collection and between one and sixteen photos are required")
+	if input.CollectionID == "" || len(input.Photos) == 0 {
+		writeError(writer, http.StatusBadRequest, "invalid_reorder", "a collection and at least one photo are required")
 		return
 	}
 
@@ -920,6 +950,10 @@ func (handler *Handler) reorderAdminPhotos(writer http.ResponseWriter, request *
 		}
 		if !found || current.CollectionID != input.CollectionID || current.Version != item.Version {
 			writeError(writer, http.StatusConflict, "version_conflict", "photo order changed by another request; reload and try again")
+			return
+		}
+		if current.Status == gallery.PublicationArchived {
+			writeError(writer, http.StatusConflict, "archived_photo_read_only", "archived photos cannot be reordered")
 			return
 		}
 		previous = append(previous, current)

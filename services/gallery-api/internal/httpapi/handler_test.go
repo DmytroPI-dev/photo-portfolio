@@ -6,16 +6,18 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/gallery"
+	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/storage"
 )
 
 type fakeOriginalStore struct{}
 
-func (fakeOriginalStore) PresignPut(_ context.Context, key, _ string) (string, error) {
-	return "https://uploads.example.test/" + key, nil
+func (fakeOriginalStore) PresignUpload(_ context.Context, key, _ string, maxBytes int64) (storage.PresignedUpload, error) {
+	return storage.PresignedUpload{URL: "https://uploads.example.test/" + key, Fields: map[string]string{"policy": "size-" + strconv.FormatInt(maxBytes, 10)}}, nil
 }
 
 func (fakeOriginalStore) PresignGet(_ context.Context, key string) (string, error) {
@@ -300,6 +302,9 @@ func TestAdminImageUploadCreatesPrivateDraftWithPreview(t *testing.T) {
 	if !strings.HasPrefix(upload.PhotoID, "photo-") || !strings.HasPrefix(upload.OriginalKey, "originals/"+upload.PhotoID+"/") || upload.UploadURL == "" {
 		t.Fatalf("upload preparation = %#v, want generated private upload details", upload)
 	}
+	if upload.UploadFields["policy"] != "size-26214400" {
+		t.Fatalf("upload fields = %#v, want constrained POST policy", upload.UploadFields)
+	}
 
 	created := requestWithHandler(t, handler, http.MethodPost, "/admin/photos", fmt.Sprintf(`{
         "uploadId":%q,"originalKey":%q,"title":"Winter Study","collectionId":"drawings",
@@ -357,6 +362,20 @@ func TestAdminPhotoReorderUpdatesPublicCollectionOrder(t *testing.T) {
 	if detail.Photos[0].ID != "drawing-02" || detail.Photos[1].ID != "drawing-01" {
 		t.Fatalf("reordered public photos = %#v, want drawing-02 then drawing-01", detail.Photos[:2])
 	}
+}
+
+func TestAdminPhotoReorderRejectsArchivedPhotos(t *testing.T) {
+	handler := NewHandler(gallery.NewSeedRepository())
+	archived := requestWithHandler(t, handler, http.MethodPost, "/admin/photos/drawing-01/archive", `{"version":1}`)
+	if archived.Code != http.StatusOK {
+		t.Fatalf("archive status = %d, want %d; body = %s", archived.Code, http.StatusOK, archived.Body.String())
+	}
+
+	reordered := requestWithHandler(t, handler, http.MethodPost, "/admin/photos/reorder", `{"collectionId":"drawings","photos":[{"id":"drawing-01","version":2}]}`)
+	if reordered.Code != http.StatusConflict {
+		t.Fatalf("reorder archived status = %d, want %d; body = %s", reordered.Code, http.StatusConflict, reordered.Body.String())
+	}
+	assertErrorCode(t, reordered, "archived_photo_read_only")
 }
 
 func TestArchivedCollectionIsReadOnlyAndCanBePermanentlyDeletedWithConfirmation(t *testing.T) {

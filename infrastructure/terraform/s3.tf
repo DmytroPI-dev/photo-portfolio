@@ -34,14 +34,14 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "gallery_originals
   }
 }
 
-# S3 evaluates this CORS rule for the direct PUT, independently of API
+# S3 evaluates this CORS rule for the direct POST, independently of API
 # Gateway's CORS configuration. Keep it limited to the admin origins.
 resource "aws_s3_bucket_cors_configuration" "gallery_originals" {
   bucket = aws_s3_bucket.gallery_originals.id
 
   cors_rule {
     allowed_headers = ["content-type"]
-    allowed_methods = ["PUT"]
+    allowed_methods = ["POST"]
     allowed_origins = var.admin_upload_cors_origins
     expose_headers  = ["ETag"]
     max_age_seconds = 3600

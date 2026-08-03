@@ -50,6 +50,13 @@ type AdminPhotoRepository interface {
 	ReorderAdminPhotos(ctx context.Context, previous, next []AdminPhoto) error
 }
 
+// AdminPhotoCollectionGuardRepository provides the stronger write path used
+// when a photo is public. It keeps a photo write conditional on the current
+// published collection revision so archive and publication cannot interleave.
+type AdminPhotoCollectionGuardRepository interface {
+	UpdateAdminPhotoForPublishedCollection(ctx context.Context, previous, next AdminPhoto, collection AdminCollection) error
+}
+
 type MemoryRepository struct {
 	collections       []Collection
 	collectionsBySlug map[string]Collection
@@ -186,6 +193,14 @@ func (repository *MemoryRepository) UpdateAdminPhoto(_ context.Context, previous
 	repository.replaceAdminPhoto(previous.ID, next)
 	repository.reconcilePublicPhoto(current, next)
 	return nil
+}
+
+func (repository *MemoryRepository) UpdateAdminPhotoForPublishedCollection(ctx context.Context, previous, next AdminPhoto, collection AdminCollection) error {
+	currentCollection, found := repository.adminByID[collection.ID]
+	if !found || currentCollection.Status != PublicationPublished || currentCollection.Version != collection.Version {
+		return ErrVersionConflict
+	}
+	return repository.UpdateAdminPhoto(ctx, previous, next)
 }
 
 func (repository *MemoryRepository) ReorderAdminPhotos(_ context.Context, previous, next []AdminPhoto) error {

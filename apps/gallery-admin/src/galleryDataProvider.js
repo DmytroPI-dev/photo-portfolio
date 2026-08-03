@@ -142,11 +142,10 @@ export const GalleryApi = (apiBaseUrl, getAccessToken) => {
           size: file.size,
         },
       });
-      const response = await fetch(upload.uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": contentType },
-        body: file,
-      });
+      const body = new FormData();
+      Object.entries(upload.uploadFields).forEach(([name, value]) => body.append(name, value));
+      body.append("file", file);
+      const response = await fetch(upload.uploadUrl, { method: "POST", body });
       if (!response.ok) {
         throw new Error("The image could not be uploaded to private storage.");
       }

@@ -59,7 +59,7 @@ variable "allowed_cors_origins" {
 }
 
 variable "admin_upload_cors_origins" {
-  description = "Admin browser origins permitted to PUT originals to the private S3 bucket with a pre-signed URL."
+  description = "Admin browser origins permitted to POST originals to the private S3 bucket with a constrained pre-signed form."
   type        = list(string)
   default = [
     "http://localhost:5174",

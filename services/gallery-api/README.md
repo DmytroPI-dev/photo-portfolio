@@ -29,7 +29,8 @@ command is for deterministic bootstrap or intentional resets.
 ## Private original uploads
 
 When Terraform supplies `GALLERY_ORIGINALS_BUCKET`, `POST /admin/uploads`
-returns a 15-minute S3 PUT URL for a JPEG, PNG, or WebP original up to 25 MB.
+returns a 15-minute constrained S3 POST form for a JPEG, PNG, or WebP original
+up to 25 MB. S3 enforces the size limit when it receives the upload.
 The browser uploads directly to that private bucket, then creates a draft photo
 using the returned opaque upload fields. `GET /admin/photos/{id}/preview`
 returns a 10-minute authenticated preview URL for that private original.

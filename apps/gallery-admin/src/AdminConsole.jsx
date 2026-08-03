@@ -921,7 +921,7 @@ const PhotoForm = ({
                 value={collection.id}
                 disabled={collection.status === "archived"}
                 style={{
-                  color: collection.status === "archived" ? "gray" : "whiteAlpha.900",
+                  color: collection.status === "archived" ? "gray" : "#f7fafc",
                   backgroundColor: collection.status === "archived" ? "inherit" : "gray",
                 }}
               >
@@ -1164,7 +1164,7 @@ const PhotosPage = ({ api }) => {
                             icon={<DragHandleIcon />}
                             size="sm"
                             variant="solid"
-                            colorScheme="green.500"
+                            colorScheme="green"
                             cursor="grab"
                           />
                         </Td>

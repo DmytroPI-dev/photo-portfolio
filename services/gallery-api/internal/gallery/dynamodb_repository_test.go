@@ -3,6 +3,7 @@ package gallery
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -155,6 +156,28 @@ func TestDynamoRepositoryPaginatesAdminPhotosForOneCollection(t *testing.T) {
 	}
 	if got := attributeString(t, client.queryInputs[1].ExclusiveStartKey["SK"]); got != "PHOTO#drawings#0001#drawing-01" {
 		t.Fatalf("second query start key = %q, want first page key", got)
+	}
+}
+
+func TestDynamoRepositoryPaginatesAllAdminPhotos(t *testing.T) {
+	firstPhoto := AdminPhoto{Photo: Photo{ID: "drawing-01", CollectionID: "drawings", Order: 1}, Status: PublicationDraft}
+	secondPhoto := AdminPhoto{Photo: Photo{ID: "nature-01", CollectionID: "nature", Order: 1}, Status: PublicationArchived}
+	lastEvaluatedKey := key(adminPhotosPartition, "PHOTO#drawings#0001#drawing-01")
+	client := &dynamoStub{queryOutputs: []*dynamodb.QueryOutput{
+		{Items: []map[string]types.AttributeValue{marshalTestItem(t, firstPhoto, adminPhotosPartition, "PHOTO#drawings#0001#drawing-01")}, LastEvaluatedKey: lastEvaluatedKey},
+		{Items: []map[string]types.AttributeValue{marshalTestItem(t, secondPhoto, adminPhotosPartition, "PHOTO#nature#0001#nature-01")}},
+	}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	photos, err := repository.ListAdminPhotos(context.Background())
+	if err != nil {
+		t.Fatalf("ListAdminPhotos returned error: %v", err)
+	}
+	if len(photos) != 2 || photos[1].ID != "nature-01" {
+		t.Fatalf("photos = %#v, want both paginated photos", photos)
+	}
+	if len(client.queryInputs) != 2 {
+		t.Fatalf("query count = %d, want 2", len(client.queryInputs))
 	}
 }
 
@@ -358,6 +381,57 @@ func TestDynamoRepositoryPublishesPhotoAndUpdatesPublicCopies(t *testing.T) {
 	}
 }
 
+func TestDynamoRepositoryGuardsPublishedPhotoWritesWithCollectionVersion(t *testing.T) {
+	previous := AdminPhoto{Photo: Photo{ID: "fixture-photo", Title: "Fixture", Src: "/images/1.jpg", CollectionID: "drawings", Width: 1350, Height: 1800, Order: 7}, Status: PublicationDraft, ProcessingStatus: ProcessingNotRequired, Version: 1}
+	next := previous
+	next.Status = PublicationPublished
+	next.Version = 2
+	collection := AdminCollection{Collection: Collection{ID: "drawings", Slug: "drawings", Order: 1}, Status: PublicationPublished, Version: 4}
+	client := &dynamoStub{transactWriteOutput: &dynamodb.TransactWriteItemsOutput{}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	if err := repository.UpdateAdminPhotoForPublishedCollection(context.Background(), previous, next, collection); err != nil {
+		t.Fatalf("UpdateAdminPhotoForPublishedCollection returned error: %v", err)
+	}
+	items := client.transactWriteInput.TransactItems
+	guard := items[len(items)-1].ConditionCheck
+	if guard == nil {
+		t.Fatalf("last transaction item = %#v, want published collection condition", items[len(items)-1])
+	}
+	if got := attributeString(t, guard.Key["PK"]); got != "COLLECTION#drawings" {
+		t.Fatalf("guard key = %q, want collection canonical key", got)
+	}
+	if got := attributeNumber(t, guard.ExpressionAttributeValues[":version"]); got != "4" {
+		t.Fatalf("guard version = %q, want 4", got)
+	}
+}
+
+func TestDynamoRepositorySplitsLargePhotoReordersIntoSafeTransactions(t *testing.T) {
+	previous := make([]AdminPhoto, 18)
+	next := make([]AdminPhoto, 18)
+	for index := range previous {
+		photo := AdminPhoto{Photo: Photo{ID: fmt.Sprintf("photo-%02d", index), Title: "Fixture", Src: "/images/1.jpg", CollectionID: "drawings", Width: 1350, Height: 1800, Order: index + 1}, Status: PublicationPublished, ProcessingStatus: ProcessingNotRequired, Version: 1}
+		previous[index] = photo
+		next[index] = photo
+		next[index].Order = len(previous) - index
+		next[index].Version = 2
+	}
+	client := &dynamoStub{transactWriteOutput: &dynamodb.TransactWriteItemsOutput{}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	if err := repository.ReorderAdminPhotos(context.Background(), previous, next); err != nil {
+		t.Fatalf("ReorderAdminPhotos returned error: %v", err)
+	}
+	if len(client.transactWriteInputs) != 2 {
+		t.Fatalf("transaction count = %d, want 2", len(client.transactWriteInputs))
+	}
+	for _, input := range client.transactWriteInputs {
+		if len(input.TransactItems) > 100 {
+			t.Fatalf("transaction contains %d items, want at most 100", len(input.TransactItems))
+		}
+	}
+}
+
 func TestDynamoRepositoryDeletesArchivedCollectionWithVersionCondition(t *testing.T) {
 	collection := AdminCollection{
 		Collection: Collection{ID: "sketches", Slug: "sketches", Title: "Sketches", Order: 4},
@@ -396,6 +470,7 @@ type dynamoStub struct {
 	queryInputs         []*dynamodb.QueryInput
 	queryOutputs        []*dynamodb.QueryOutput
 	transactWriteInput  *dynamodb.TransactWriteItemsInput
+	transactWriteInputs []*dynamodb.TransactWriteItemsInput
 	transactWriteOutput *dynamodb.TransactWriteItemsOutput
 	transactWriteErr    error
 }
@@ -416,6 +491,7 @@ func (stub *dynamoStub) Query(_ context.Context, input *dynamodb.QueryInput, _ .
 
 func (stub *dynamoStub) TransactWriteItems(_ context.Context, input *dynamodb.TransactWriteItemsInput, _ ...func(*dynamodb.Options)) (*dynamodb.TransactWriteItemsOutput, error) {
 	stub.transactWriteInput = input
+	stub.transactWriteInputs = append(stub.transactWriteInputs, input)
 	return stub.transactWriteOutput, stub.transactWriteErr
 }
 
