@@ -732,6 +732,8 @@ func (handler *Handler) createAdminPhoto(writer http.ResponseWriter, request *ht
 		return
 	}
 
+	// TODO: FocalPointX and FocalPointY are intentionally defaulted to 0.5 (centre) until derivative
+	// generation and a visual crop editor are implemented; at that point, wire them from input.FocalPointX/Y.
 	photo := gallery.AdminPhoto{Photo: gallery.Photo{
 		ID:           photoID,
 		Title:        strings.TrimSpace(input.Title),
