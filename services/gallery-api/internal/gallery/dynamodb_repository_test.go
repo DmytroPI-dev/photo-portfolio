@@ -187,6 +187,31 @@ func TestDynamoRepositoryCreatesDraftCollectionWithoutPublicCopies(t *testing.T)
 	}
 }
 
+func TestDynamoRepositoryCreatesDraftPhotoWithoutPublicCopies(t *testing.T) {
+	photo := AdminPhoto{
+		Photo:            Photo{ID: "fixture-photo", Title: "Fixture", Src: "/images/1.jpg", CollectionID: "drawings", Width: 1350, Height: 1800, Order: 7},
+		Status:           PublicationDraft,
+		ProcessingStatus: ProcessingNotRequired,
+		Version:          1,
+	}
+	client := &dynamoStub{transactWriteOutput: &dynamodb.TransactWriteItemsOutput{}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	if err := repository.CreateAdminPhoto(context.Background(), photo); err != nil {
+		t.Fatalf("CreateAdminPhoto returned error: %v", err)
+	}
+	items := client.transactWriteInput.TransactItems
+	if len(items) != 2 || items[0].Put == nil || items[1].Put == nil {
+		t.Fatalf("transaction items = %#v, want canonical and private index puts", items)
+	}
+	if got := attributeString(t, items[0].Put.Item["PK"]); got != "PHOTO#fixture-photo" {
+		t.Fatalf("canonical PK = %q, want PHOTO#fixture-photo", got)
+	}
+	if got := attributeString(t, items[1].Put.Item["PK"]); got != adminPhotosPartition {
+		t.Fatalf("index PK = %q, want %s", got, adminPhotosPartition)
+	}
+}
+
 func TestDynamoRepositoryClassifiesConditionalTransactionFailuresByOperation(t *testing.T) {
 	cancellation := &types.TransactionCanceledException{
 		CancellationReasons: []types.CancellationReason{{Code: aws.String("ConditionalCheckFailed")}},
@@ -300,6 +325,37 @@ func TestDynamoRepositoryReconcilesPublicCopiesForPublicationStateTransitions(t 
 			t.Fatalf("fourth item = %#v, want public index delete", items[3])
 		}
 	})
+}
+
+func TestDynamoRepositoryPublishesPhotoAndUpdatesPublicCopies(t *testing.T) {
+	previous := AdminPhoto{
+		Photo:            Photo{ID: "fixture-photo", Title: "Fixture", Src: "/images/1.jpg", CollectionID: "drawings", Width: 1350, Height: 1800, Order: 7},
+		Status:           PublicationDraft,
+		ProcessingStatus: ProcessingNotRequired,
+		Version:          1,
+	}
+	next := previous
+	next.Status = PublicationPublished
+	next.Version = 2
+	client := &dynamoStub{transactWriteOutput: &dynamodb.TransactWriteItemsOutput{}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	if err := repository.UpdateAdminPhoto(context.Background(), previous, next); err != nil {
+		t.Fatalf("UpdateAdminPhoto returned error: %v", err)
+	}
+	items := client.transactWriteInput.TransactItems
+	if len(items) != 4 {
+		t.Fatalf("transaction items = %d, want canonical, admin index, and two public puts", len(items))
+	}
+	if got := attributeString(t, items[2].Put.Item["PK"]); got != "PHOTO#fixture-photo" {
+		t.Fatalf("public metadata PK = %q, want PHOTO#fixture-photo", got)
+	}
+	if got := attributeString(t, items[3].Put.Item["PK"]); got != "COLLECTION#drawings" {
+		t.Fatalf("public collection index PK = %q, want COLLECTION#drawings", got)
+	}
+	if got := items[0].Put.ExpressionAttributeNames["#version"]; got != "Version" {
+		t.Fatalf("version condition attribute = %q, want Version", got)
+	}
 }
 
 func TestDynamoRepositoryDeletesArchivedCollectionWithVersionCondition(t *testing.T) {

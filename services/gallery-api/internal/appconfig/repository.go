@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/gallery"
+	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/storage"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 )
@@ -27,4 +28,20 @@ func NewRepository(ctx context.Context) (gallery.Repository, error) {
 	}
 
 	return gallery.NewDynamoRepository(dynamodb.NewFromConfig(awsConfig), table), nil
+}
+
+// NewOriginalStore is nil for the local seed-only server. In AWS, the Lambda
+// receives the private originals bucket name from Terraform and can mint the
+// narrowly scoped, short-lived URLs used by the admin browser.
+func NewOriginalStore(ctx context.Context) (storage.Presigner, error) {
+	bucket := strings.TrimSpace(os.Getenv("GALLERY_ORIGINALS_BUCKET"))
+	if bucket == "" {
+		return nil, nil
+	}
+
+	awsConfig, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load AWS SDK configuration for originals: %w", err)
+	}
+	return storage.NewOriginalStore(awsConfig, bucket), nil
 }

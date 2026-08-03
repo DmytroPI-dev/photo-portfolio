@@ -63,3 +63,22 @@ resource "aws_iam_role_policy" "gallery_api_metadata_write" {
   role   = aws_iam_role.gallery_api.id
   policy = data.aws_iam_policy_document.gallery_api_metadata_write.json
 }
+
+# The API signs object operations but never receives original image bytes. The
+# resource scope limits it to objects in this portfolio's private bucket.
+data "aws_iam_policy_document" "gallery_api_originals" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject",
+    ]
+    resources = ["${aws_s3_bucket.gallery_originals.arn}/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "gallery_api_originals" {
+  name   = "${local.name_prefix}-gallery-originals"
+  role   = aws_iam_role.gallery_api.id
+  policy = data.aws_iam_policy_document.gallery_api_originals.json
+}

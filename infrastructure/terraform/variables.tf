@@ -58,6 +58,16 @@ variable "allowed_cors_origins" {
   ]
 }
 
+variable "admin_upload_cors_origins" {
+  description = "Admin browser origins permitted to PUT originals to the private S3 bucket with a pre-signed URL."
+  type        = list(string)
+  default = [
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "https://admin.photo-gallery.i-dmytro.org",
+  ]
+}
+
 variable "admin_callback_urls" {
   description = "OAuth callback URLs for the React-admin SPA. The production hostname is reserved until its CloudFront distribution is deployed."
   type        = list(string)

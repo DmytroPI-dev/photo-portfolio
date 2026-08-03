@@ -19,7 +19,12 @@ func main() {
 		log.Fatalf("configure gallery repository: %v", err)
 	}
 
-	handler := httpapi.NewHandler(repository)
+	originalStore, err := appconfig.NewOriginalStore(context.Background())
+	if err != nil {
+		log.Fatalf("configure original image storage: %v", err)
+	}
+
+	handler := httpapi.NewHandlerWithOriginals(repository, originalStore)
 	if os.Getenv("AWS_LAMBDA_RUNTIME_API") != "" {
 		// provided.al2023 invokes the custom-runtime bootstrap binary through the
 		// Lambda Runtime API. The adapter preserves the local net/http handler so

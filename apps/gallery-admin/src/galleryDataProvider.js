@@ -20,6 +20,35 @@ const collectionPayload = (data, includeSlug) => ({
   ...(includeSlug ? {} : { version: data.version }),
 });
 
+const photoPayload = (data, includeUpload) => ({
+  ...(includeUpload
+    ? { uploadId: data.uploadId, originalKey: data.originalKey }
+    : { version: data.version }),
+  title: data.title.trim(),
+  description: data.description.trim(),
+  collectionId: data.collectionId,
+  width: Number(data.width),
+  height: Number(data.height),
+  year: data.year.trim(),
+  location: data.location.trim(),
+  featured: Boolean(data.featured),
+  order: Number(data.order),
+  altText: data.altText.trim(),
+  tags: data.tags,
+});
+
+// The placeholders belong to the public portfolio rather than the separate
+// admin bundle. Keeping this origin configurable lets the same metadata show
+// a real preview locally and after the sites move to independent hostnames.
+const previewOrigin = (import.meta.env.VITE_GALLERY_PREVIEW_ORIGIN || "https://photo-gallery.i-dmytro.org").replace(/\/$/, "");
+
+export const photoPreviewURL = (src) => {
+  if (!src || /^https?:\/\//i.test(src)) {
+    return src;
+  }
+  return `${previewOrigin}${src.startsWith("/") ? src : `/${src}`}`;
+};
+
 export const GalleryApi = (apiBaseUrl, getAccessToken) => {
   const request = async (path, options = {}) => {
     const accessToken = await getAccessToken();
@@ -99,5 +128,79 @@ export const GalleryApi = (apiBaseUrl, getAccessToken) => {
     },
 
     getPhoto: (id) => request(`/admin/photos/${encodeURIComponent(id)}`),
+
+    getPhotoPreview: (id) =>
+      request(`/admin/photos/${encodeURIComponent(id)}/preview`),
+
+    async uploadOriginal(file) {
+      const contentType = file.type || imageContentType(file.name);
+      const upload = await request("/admin/uploads", {
+        method: "POST",
+        body: {
+          filename: file.name,
+          contentType,
+          size: file.size,
+        },
+      });
+      const response = await fetch(upload.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": contentType },
+        body: file,
+      });
+      if (!response.ok) {
+        throw new Error("The image could not be uploaded to private storage.");
+      }
+      return upload;
+    },
+
+    createPhoto: (data) =>
+      request("/admin/photos", {
+        method: "POST",
+        body: photoPayload(data, true),
+      }),
+
+    updatePhoto: (id, data) =>
+      request(`/admin/photos/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: photoPayload(data, false),
+      }),
+
+    publishPhoto: (id, version) =>
+      request(`/admin/photos/${encodeURIComponent(id)}/publish`, {
+        method: "POST",
+        body: { version },
+      }),
+
+    archivePhoto: (id, version) =>
+      request(`/admin/photos/${encodeURIComponent(id)}/archive`, {
+        method: "POST",
+        body: { version },
+      }),
+
+    restorePhoto: (id, version) =>
+      request(`/admin/photos/${encodeURIComponent(id)}/restore`, {
+        method: "POST",
+        body: { version },
+      }),
+
+    async reorderPhotos(collectionId, photos) {
+      const response = await request("/admin/photos/reorder", {
+        method: "POST",
+        body: { collectionId, photos: photos.map(({ id, version }) => ({ id, version })) },
+      });
+      return response.items;
+    },
   };
+};
+
+const imageContentType = (filename) => {
+  const extension = filename.split(".").pop()?.toLowerCase();
+  return (
+    {
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      png: "image/png",
+      webp: "image/webp",
+    }[extension] || "application/octet-stream"
+  );
 };

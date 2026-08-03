@@ -371,6 +371,121 @@ func (repository *DynamoRepository) DeleteAdminCollection(ctx context.Context, c
 	return writeError("delete admin collection", err, ErrVersionConflict)
 }
 
+// CreateAdminPhoto writes the canonical record and its private list entry. A
+// new photo is always a draft, so there are no anonymous gallery copies yet.
+func (repository *DynamoRepository) CreateAdminPhoto(ctx context.Context, photo AdminPhoto) error {
+	canonicalItem, err := marshalItem(photo, photoPartition(photo.ID), canonicalAdminSortKey)
+	if err != nil {
+		return fmt.Errorf("marshal canonical photo %q: %w", photo.ID, err)
+	}
+	indexItem, err := marshalItem(photo, adminPhotosPartition, adminPhotoIndexSortKey(photo))
+	if err != nil {
+		return fmt.Errorf("marshal admin photo index %q: %w", photo.ID, err)
+	}
+
+	_, err = repository.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
+		TransactItems: []types.TransactWriteItem{
+			conditionalPut(repository.table, canonicalItem, "attribute_not_exists(PK)"),
+			conditionalPut(repository.table, indexItem, "attribute_not_exists(PK)"),
+		},
+	})
+	return writeError("create admin photo", err, ErrAlreadyExists)
+}
+
+// UpdateAdminPhoto keeps the canonical record, private index, and (when
+// published) public metadata/index copies in one DynamoDB transaction.
+func (repository *DynamoRepository) UpdateAdminPhoto(ctx context.Context, previous, next AdminPhoto) error {
+	items, err := repository.adminPhotoUpdateItems(previous, next)
+	if err != nil {
+		return err
+	}
+	_, err = repository.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: items})
+	return writeError("update admin photo", err, ErrVersionConflict)
+}
+
+// ReorderAdminPhotos updates one collection atomically. A published photo can
+// need six writes when its order changes, so the handler caps a reorder at
+// sixteen records and remains below DynamoDB's 100-item transaction limit.
+func (repository *DynamoRepository) ReorderAdminPhotos(ctx context.Context, previous, next []AdminPhoto) error {
+	if len(previous) != len(next) {
+		return ErrVersionConflict
+	}
+	items := make([]types.TransactWriteItem, 0, len(previous)*6)
+	for index, photo := range previous {
+		if photo.ID != next[index].ID {
+			return ErrVersionConflict
+		}
+		photoItems, err := repository.adminPhotoUpdateItems(photo, next[index])
+		if err != nil {
+			return err
+		}
+		items = append(items, photoItems...)
+	}
+	_, err := repository.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: items})
+	return writeError("reorder admin photos", err, ErrVersionConflict)
+}
+
+func (repository *DynamoRepository) adminPhotoUpdateItems(previous, next AdminPhoto) ([]types.TransactWriteItem, error) {
+	canonicalItem, err := marshalItem(next, photoPartition(next.ID), canonicalAdminSortKey)
+	if err != nil {
+		return nil, fmt.Errorf("marshal canonical photo %q: %w", next.ID, err)
+	}
+	newIndexItem, err := marshalItem(next, adminPhotosPartition, adminPhotoIndexSortKey(next))
+	if err != nil {
+		return nil, fmt.Errorf("marshal admin photo index %q: %w", next.ID, err)
+	}
+
+	items := []types.TransactWriteItem{
+		conditionalPutWithVersion(repository.table, canonicalItem, previous.Version),
+	}
+	oldIndexKey := adminPhotoIndexSortKey(previous)
+	newIndexKey := adminPhotoIndexSortKey(next)
+	if oldIndexKey != newIndexKey {
+		items = append(items, deleteItem(repository.table, key(adminPhotosPartition, oldIndexKey)))
+	}
+	items = append(items, putItem(repository.table, newIndexItem))
+
+	wasPublished := previous.Status == PublicationPublished
+	isPublished := next.Status == PublicationPublished
+	switch {
+	case wasPublished && !isPublished:
+		items = append(items,
+			deleteItem(repository.table, key(photoPartition(previous.ID), metadataSortKey)),
+			deleteItem(repository.table, key(collectionPartition(previous.CollectionID), publicPhotoIndexSortKey(previous.Photo))),
+		)
+	case !wasPublished && isPublished:
+		publicItems, err := publicPhotoPutItems(repository.table, next.Photo)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, publicItems...)
+	case wasPublished && isPublished:
+		oldPublicKey := publicPhotoIndexSortKey(previous.Photo)
+		newPublicKey := publicPhotoIndexSortKey(next.Photo)
+		if previous.CollectionID != next.CollectionID || oldPublicKey != newPublicKey {
+			items = append(items, deleteItem(repository.table, key(collectionPartition(previous.CollectionID), oldPublicKey)))
+		}
+		publicItems, err := publicPhotoPutItems(repository.table, next.Photo)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, publicItems...)
+	}
+	return items, nil
+}
+
+func publicPhotoPutItems(table string, photo Photo) ([]types.TransactWriteItem, error) {
+	metadataItem, err := marshalItem(photo, photoPartition(photo.ID), metadataSortKey)
+	if err != nil {
+		return nil, fmt.Errorf("marshal public photo %q: %w", photo.ID, err)
+	}
+	collectionItem, err := marshalItem(photo, collectionPartition(photo.CollectionID), publicPhotoIndexSortKey(photo))
+	if err != nil {
+		return nil, fmt.Errorf("marshal public collection photo %q: %w", photo.ID, err)
+	}
+	return []types.TransactWriteItem{putItem(table, metadataItem), putItem(table, collectionItem)}, nil
+}
+
 func adminCollectionIndexSortKey(collection AdminCollection) string {
 	return fmt.Sprintf("COLLECTION#%04d#%s", collection.Order, collection.ID)
 }
@@ -379,11 +494,33 @@ func publicCollectionIndexSortKey(collection Collection) string {
 	return fmt.Sprintf("COLLECTION#%04d#%s", collection.Order, collection.Slug)
 }
 
+func adminPhotoIndexSortKey(photo AdminPhoto) string {
+	return fmt.Sprintf("PHOTO#%s#%04d#%s", photo.CollectionID, photo.Order, photo.ID)
+}
+
+func publicPhotoIndexSortKey(photo Photo) string {
+	return fmt.Sprintf("PHOTO#%04d#%s", photo.Order, photo.ID)
+}
+
 func conditionalPut(table string, item map[string]types.AttributeValue, condition string) types.TransactWriteItem {
 	return types.TransactWriteItem{Put: &types.Put{
 		TableName:           aws.String(table),
 		Item:                item,
 		ConditionExpression: aws.String(condition),
+	}}
+}
+
+func conditionalPutWithVersion(table string, item map[string]types.AttributeValue, version int) types.TransactWriteItem {
+	return types.TransactWriteItem{Put: &types.Put{
+		TableName:           aws.String(table),
+		Item:                item,
+		ConditionExpression: aws.String("#version = :version"),
+		ExpressionAttributeNames: map[string]string{
+			"#version": "Version",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":version": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", version)},
+		},
 	}}
 }
 

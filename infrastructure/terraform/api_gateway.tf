@@ -136,6 +136,15 @@ resource "aws_apigatewayv2_route" "admin_photos" {
   authorization_scopes = ["gallery/read"]
 }
 
+resource "aws_apigatewayv2_route" "admin_uploads" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "POST /admin/uploads"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/write"]
+}
+
 resource "aws_apigatewayv2_route" "admin_photo" {
   api_id               = aws_apigatewayv2_api.gallery.id
   route_key            = "GET /admin/photos/{id}"
@@ -143,6 +152,69 @@ resource "aws_apigatewayv2_route" "admin_photo" {
   authorization_type   = "JWT"
   authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
   authorization_scopes = ["gallery/read"]
+}
+
+resource "aws_apigatewayv2_route" "admin_photo_preview" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "GET /admin/photos/{id}/preview"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/read"]
+}
+
+resource "aws_apigatewayv2_route" "admin_photos_write" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "POST /admin/photos"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/write"]
+}
+
+resource "aws_apigatewayv2_route" "admin_photo_write" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "PATCH /admin/photos/{id}"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/write"]
+}
+
+resource "aws_apigatewayv2_route" "admin_photos_reorder" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "POST /admin/photos/reorder"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/write"]
+}
+
+resource "aws_apigatewayv2_route" "admin_photo_publish" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "POST /admin/photos/{id}/publish"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/publish"]
+}
+
+resource "aws_apigatewayv2_route" "admin_photo_archive" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "POST /admin/photos/{id}/archive"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/publish"]
+}
+
+resource "aws_apigatewayv2_route" "admin_photo_restore" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "POST /admin/photos/{id}/restore"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/publish"]
 }
 
 resource "aws_apigatewayv2_stage" "default" {
