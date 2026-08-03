@@ -17,17 +17,21 @@ The AWS metadata foundation is live in `eu-central-1`:
 - DynamoDB public read models and canonical private administrator records
 - Cognito hosted login with PKCE, access-token scopes, and required TOTP MFA
 - A Chakra UI administrator console for collection creation, editing, publish,
-  archive, guarded deletion, and photo read views
+  archive, restore, guarded deletion, and photo CRUD source, including fixture
+  previews and collection-scoped ordering
 - Terraform-managed budget alerts and Cost Anomaly Detection
 
-The repository does not yet include direct S3 uploads, image processing,
-derivative generation, photo CRUD, or CloudFront/S3 hosting for the public and
-admin SPAs. The public hostname continues to use its existing deployment while
-that work is planned.
+The next Terraform increment adds a private S3 originals bucket, direct
+pre-signed uploads, automatic image metadata, and short-lived admin previews.
+Uploaded photos remain private drafts until the subsequent processing increment
+produces public derivatives. Image processing, derivative generation, and
+CloudFront/S3 hosting for the public and admin SPAs are still outstanding. The
+public hostname continues to use its existing deployment while that work is
+planned.
 
-The current source also adds archived-to-draft collection restore. Its saved
-Terraform plan, `collection-lifecycle-restore.tfplan`, is ready for the
-developer-operated apply described below.
+The collection restore flow is deployed and smoke-tested. A future Cognito
+role increment will distinguish full `gallery-superuser` access from a
+photo-only editor role.
 
 ## Repository Layout
 
@@ -94,11 +98,17 @@ GET /photos/{id}
 ```
 
 Protected administrator routes currently cover collection CRUD/lifecycle and
-photo read views. Collection lifecycle is deliberate: drafts may publish,
+photo CRUD/lifecycle source. Collection lifecycle is deliberate: drafts may publish,
 published collections may archive only after published photos are moved or
-archived, and archived collections are read-only. The pending restore route
-returns an archived collection to draft. Permanent deletion requires an
+archived, and archived collections are read-only. Restore returns an archived
+collection to draft. Permanent deletion requires an
 archived, empty collection and an exact-slug confirmation.
+
+Photo records use the same draft/published/archived lifecycle. Existing
+placeholder records preview their `/images/*` paths; newly uploaded originals
+use a private, time-limited admin preview and cannot publish before processing
+has produced a derivative. Photo deletion is intentionally deferred until it
+can also clean up original and derivative S3 objects.
 
 See [services/gallery-api/README.md](services/gallery-api/README.md) for the
 seed command and API-specific notes.
@@ -127,8 +137,8 @@ The Lambda artifact must be rebuilt before planning an API deployment:
 
 ## Next Work
 
-1. Add photo create/edit/publish/archive flows with collection selection.
-2. Add private-original S3 uploads using pre-signed URLs.
+1. Apply and smoke-test the private-original upload increment.
+2. Add Cognito group authorization for superusers and photo editors.
 3. Add S3-to-SQS image processing with Go/libvips and responsive derivatives.
 4. Deploy public and admin builds to private S3 buckets behind CloudFront.
 5. Replace local frontend metadata and placeholder sources with the API and

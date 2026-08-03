@@ -1,4 +1,12 @@
-import { AddIcon, ArrowBackIcon, EditIcon, ViewIcon } from "@chakra-ui/icons";
+import {
+  AddIcon,
+  ArrowBackIcon,
+  ArrowDownIcon,
+  ArrowUpIcon,
+  DragHandleIcon,
+  EditIcon,
+  ViewIcon,
+} from "@chakra-ui/icons";
 import {
   Alert,
   AlertIcon,
@@ -27,6 +35,9 @@ import {
   Input,
   NumberInput,
   NumberInputField,
+  Image,
+  Select,
+  Switch,
   Modal,
   ModalBody,
   ModalCloseButton,
@@ -36,7 +47,7 @@ import {
   ModalOverlay,
   useDisclosure,
 } from "@chakra-ui/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Link as RouterLink,
   Navigate,
@@ -46,7 +57,7 @@ import {
   useNavigate,
   useParams,
 } from "react-router-dom";
-import { GalleryApiError } from "./galleryDataProvider";
+import { GalleryApiError, photoPreviewURL } from "./galleryDataProvider";
 import { signOut } from "./authProvider";
 
 // The console uses only a compact set of shared primitives. It remains an
@@ -88,11 +99,12 @@ const LoadingState = ({ label = "Loading gallery metadata..." }) => (
 );
 
 const CollectionStatus = ({ status }) => {
-  const colorScheme = {
-    draft: "yellow",
-    published: "green",
-    archived: "gray",
-  }[status] || "gray";
+  const colorScheme =
+    {
+      draft: "yellow",
+      published: "green",
+      archived: "gray",
+    }[status] || "gray";
 
   return <Badge colorScheme={colorScheme}>{status}</Badge>;
 };
@@ -270,19 +282,26 @@ const CollectionForm = ({
             <NumberInputField />
           </NumberInput>
         </FormControl>
-        {!readOnly ? <HStack pt={2}>
-          <Button
-            type="submit"
-            colorScheme="yellow"
-            isLoading={pending}
-            loadingText="Saving"
-          >
-            {submitLabel}
-          </Button>
-          <Button as={RouterLink} to="/collections" variant="solid" colorScheme="green">
-            Cancel
-          </Button>
-        </HStack> : null}
+        {!readOnly ? (
+          <HStack pt={2}>
+            <Button
+              type="submit"
+              colorScheme="yellow"
+              isLoading={pending}
+              loadingText="Saving"
+            >
+              {submitLabel}
+            </Button>
+            <Button
+              as={RouterLink}
+              to="/collections"
+              variant="solid"
+              colorScheme="green"
+            >
+              Cancel
+            </Button>
+          </HStack>
+        ) : null}
       </Stack>
     </Box>
   );
@@ -313,16 +332,16 @@ const DeleteCollectionControl = ({ collection, pending, onDelete }) => {
       <Modal isOpen={isOpen} onClose={close} isCentered>
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader
-          color="red.500"
-          >Delete collection</ModalHeader>
+          <ModalHeader color="red.500">Delete collection</ModalHeader>
           <ModalCloseButton />
           <ModalBody>
-            <Text
-            color="black"
-            >
+            <Text color="black">
               This permanently removes the archived collection metadata. Type
-              <Text as="span" fontWeight="bold"> {collection.slug}</Text> to confirm.
+              <Text as="span" fontWeight="bold">
+                {" "}
+                {collection.slug}
+              </Text>{" "}
+              to confirm.
             </Text>
             <Input
               mt={4}
@@ -435,7 +454,9 @@ const CollectionsPage = ({ api }) => {
                   <Td>{collection.order}</Td>
                   <Td fontWeight="semibold">{collection.title}</Td>
                   <Td color="whiteAlpha.700">{collection.slug}</Td>
-                  <Td><CollectionStatus status={collection.status} /></Td>
+                  <Td>
+                    <CollectionStatus status={collection.status} />
+                  </Td>
                   <Td color="whiteAlpha.700">
                     {collection.coverPhotoId || "-"}
                   </Td>
@@ -567,18 +588,20 @@ const CollectionEditPage = ({ api }) => {
     setPending(true);
     setError(null);
     try {
-      const updated = action === "publish"
-        ? await api.publishCollection(id, collection.version)
-        : action === "archive"
-          ? await api.archiveCollection(id, collection.version)
-          : await api.restoreCollection(id, collection.version);
+      const updated =
+        action === "publish"
+          ? await api.publishCollection(id, collection.version)
+          : action === "archive"
+            ? await api.archiveCollection(id, collection.version)
+            : await api.restoreCollection(id, collection.version);
       setCollection(updated);
       toast({
-        title: action === "publish"
-          ? "Collection published"
-          : action === "archive"
-            ? "Collection archived"
-            : "Collection restored as draft",
+        title:
+          action === "publish"
+            ? "Collection published"
+            : action === "archive"
+              ? "Collection archived"
+              : "Collection restored as draft",
         status: "success",
         duration: 3000,
         isClosable: true,
@@ -655,18 +678,31 @@ const CollectionEditPage = ({ api }) => {
         </HStack>
         <HStack>
           {collection.status === "draft" ? (
-            <Button colorScheme="green" onClick={() => transition("publish")} isLoading={pending}>
+            <Button
+              colorScheme="green"
+              onClick={() => transition("publish")}
+              isLoading={pending}
+            >
               Publish
             </Button>
           ) : null}
-          {collection.status === "draft" || collection.status === "published" ? (
-            <Button colorScheme="orange" onClick={() => transition("archive")} isLoading={pending}>
+          {collection.status === "draft" ||
+          collection.status === "published" ? (
+            <Button
+              colorScheme="orange"
+              onClick={() => transition("archive")}
+              isLoading={pending}
+            >
               Archive
             </Button>
           ) : null}
           {collection.status === "archived" ? (
             <>
-              <Button colorScheme="blue" onClick={() => transition("restore")} isLoading={pending}>
+              <Button
+                colorScheme="blue"
+                onClick={() => transition("restore")}
+                isLoading={pending}
+              >
                 Restore
               </Button>
               <DeleteCollectionControl
@@ -691,127 +727,584 @@ const CollectionEditPage = ({ api }) => {
   );
 };
 
+const PhotoStatus = ({ status }) => <CollectionStatus status={status} />;
+
+const ProcessingStatus = ({ status }) =>
+  status && status !== "not_required" ? (
+    <Badge colorScheme={status === "ready" ? "green" : "yellow"}>
+      {status}
+    </Badge>
+  ) : null;
+
+const PhotoPreview = ({ photo, api, size = "72px" }) => {
+  const [privatePreviewURL, setPrivatePreviewURL] = useState("");
+  const publicPreviewURL = photo.previewURL || photoPreviewURL(photo.src);
+
+  useEffect(() => {
+    let active = true;
+    if (publicPreviewURL || !api || !photo.id || !photo.originalKey) {
+      setPrivatePreviewURL("");
+      return () => {
+        active = false;
+      };
+    }
+    api
+      .getPhotoPreview(photo.id)
+      .then((response) => active && setPrivatePreviewURL(response.url))
+      .catch(() => active && setPrivatePreviewURL(""));
+    return () => {
+      active = false;
+    };
+  }, [api, photo.id, photo.originalKey, publicPreviewURL]);
+
+  const src = publicPreviewURL || privatePreviewURL;
+  return src ? (
+    <Image
+      src={src}
+      alt={photo.altText || photo.title || "Photo preview"}
+      boxSize={size}
+      objectFit="cover"
+      borderRadius="sm"
+      bg="whiteAlpha.100"
+    />
+  ) : (
+    <Box boxSize={size} borderRadius="sm" bg="whiteAlpha.100" />
+  );
+};
+
+const imageDetails = (file) =>
+  new Promise((resolve, reject) => {
+    const objectURL = URL.createObjectURL(file);
+    const image = new window.Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectURL);
+      resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectURL);
+      reject(new Error("The selected file is not a readable image."));
+    };
+    image.src = objectURL;
+  });
+
+const titleFromFilename = (filename) =>
+  filename
+    .replace(/\.[^.]+$/, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const PhotoDropzone = ({ onSelect, pending, readOnly = false }) => {
+  const inputRef = useRef(null);
+  const [dragging, setDragging] = useState(false);
+  const selectFiles = (files) => {
+    const imageFiles = Array.from(files || []);
+    if (imageFiles.length > 0) onSelect(imageFiles);
+  };
+
+  return (
+    <FormControl isRequired>
+      <FormLabel>Image</FormLabel>
+      <Box
+        borderWidth="1px"
+        borderStyle="dashed"
+        borderColor={dragging ? "gold.300" : "whiteAlpha.400"}
+        borderRadius="md"
+        px={6}
+        py={10}
+        textAlign="center"
+        bg={dragging ? "whiteAlpha.100" : "transparent"}
+        cursor={readOnly || pending ? "default" : "pointer"}
+        onClick={() => !readOnly && !pending && inputRef.current?.click()}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          if (!readOnly && !pending) setDragging(true);
+        }}
+        onDragOver={(event) => event.preventDefault()}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDragging(false);
+          if (!readOnly && !pending) selectFiles(event.dataTransfer.files);
+        }}
+      >
+        <Stack spacing={3} align="center">
+          <Text color="whiteAlpha.800">
+            {pending ? "Uploading images..." : "Drop images here"}
+          </Text>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            colorScheme="yellow"
+            isDisabled={readOnly || pending}
+            onClick={(event) => {
+              event.stopPropagation();
+              inputRef.current?.click();
+            }}
+          >
+            Choose image
+          </Button>
+        </Stack>
+        <Input
+          ref={inputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          multiple
+          display="none"
+          onChange={(event) => selectFiles(event.target.files)}
+        />
+      </Box>
+    </FormControl>
+  );
+};
+
+const PhotoForm = ({
+  initialValue,
+  collections,
+  onSubmit,
+  pending,
+  submitLabel,
+  readOnly = false,
+  api,
+}) => {
+  const [form, setForm] = useState(initialValue);
+  const collectionOptions = collections.filter(
+    (collection) =>
+      collection.status !== "archived" || collection.id === form.collectionId,
+  );
+
+  useEffect(() => setForm(initialValue), [initialValue]);
+
+  const change = (field) => (event) =>
+    setForm((current) => ({ ...current, [field]: event.target.value }));
+  return (
+    <Box
+      as="form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!readOnly) {
+          onSubmit({ ...form, tags: form.tagsText.split(",") });
+        }
+      }}
+    >
+      <Stack spacing={5} maxW="780px">
+        {form.previewURL || form.src || form.originalKey ? (
+          <PhotoPreview photo={form} api={api} size="180px" />
+        ) : null}
+        <FormControl isRequired>
+          <FormLabel>Title</FormLabel>
+          <Input
+            value={form.title}
+            onChange={change("title")}
+            isReadOnly={readOnly}
+            autoComplete="off"
+          />
+        </FormControl>
+        <FormControl isRequired>
+          <FormLabel>Collection</FormLabel>
+          <Select
+            value={form.collectionId}
+            onChange={change("collectionId")}
+            isDisabled={readOnly}
+          >
+            <option
+              value=""
+              disabled
+              style={{ color: "gray" }}
+            >
+              Choose a collection
+            </option>
+            {collectionOptions.map((collection) => (
+              <option
+                key={collection.id}
+                value={collection.id}
+                disabled={collection.status === "archived"}
+                style={{
+                  color: collection.status === "archived" ? "gray" : "#f7fafc",
+                  backgroundColor: collection.status === "archived" ? "inherit" : "gray",
+                }}
+              >
+                {collection.title} ({collection.status})
+              </option>
+            ))}
+          </Select>
+        </FormControl>
+        <FormControl>
+          <FormLabel>Description</FormLabel>
+          <Textarea
+            value={form.description}
+            onChange={change("description")}
+            isReadOnly={readOnly}
+            rows={4}
+            resize="vertical"
+          />
+        </FormControl>
+        <FormControl>
+          <FormLabel>Alt text</FormLabel>
+          <Input
+            value={form.altText}
+            onChange={change("altText")}
+            isReadOnly={readOnly}
+            autoComplete="off"
+          />
+        </FormControl>
+        <FormControl>
+          <FormLabel>Tags</FormLabel>
+          <Input
+            value={form.tagsText}
+            onChange={change("tagsText")}
+            isReadOnly={readOnly}
+            autoComplete="off"
+          />
+        </FormControl>
+        <HStack align="start" spacing={4} flexWrap="wrap">
+          <FormControl display="flex" alignItems="center" minW="160px" pt={8}>
+            <FormLabel mb="0">Featured</FormLabel>
+            <Switch
+              isChecked={form.featured}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  featured: event.target.checked,
+                }))
+              }
+              isDisabled={readOnly}
+            />
+          </FormControl>
+        </HStack>
+        <HStack align="start" spacing={4} flexWrap="wrap">
+          <FormControl minW="160px" flex="1">
+            <FormLabel>Year</FormLabel>
+            <Input
+              value={form.year}
+              onChange={change("year")}
+              isReadOnly={readOnly}
+            />
+          </FormControl>
+          <FormControl minW="160px" flex="1">
+            <FormLabel>Location</FormLabel>
+            <Input
+              value={form.location}
+              onChange={change("location")}
+              isReadOnly={readOnly}
+            />
+          </FormControl>
+        </HStack>
+        {!readOnly ? (
+          <HStack pt={2}>
+            <Button
+              type="submit"
+              colorScheme="yellow"
+              isLoading={pending}
+              loadingText="Saving"
+            >
+              {submitLabel}
+            </Button>
+            <Button
+              as={RouterLink}
+              to="/photos"
+              variant="solid"
+              colorScheme="green"
+            >
+              Cancel
+            </Button>
+          </HStack>
+        ) : null}
+      </Stack>
+    </Box>
+  );
+};
+
+const groupPhotosByCollection = (photos) =>
+  photos.reduce((groups, photo) => {
+    const group = groups.get(photo.collectionId) || [];
+    group.push(photo);
+    groups.set(photo.collectionId, group);
+    return groups;
+  }, new Map());
+
 const PhotosPage = ({ api }) => {
   const [photos, setPhotos] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [pendingCollection, setPendingCollection] = useState(null);
+  const [draggedID, setDraggedID] = useState(null);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    let alive = true;
-    api
-      .listPhotos()
-      .then((items) => alive && setPhotos(items))
-      .catch((reason) => alive && setError(reason))
-      .finally(() => alive && setLoading(false));
-    return () => {
-      alive = false;
-    };
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setPhotos(await api.listPhotos());
+    } catch (reason) {
+      setError(reason);
+    } finally {
+      setLoading(false);
+    }
   }, [api]);
+  useEffect(() => {
+    load();
+  }, [load]);
 
+  const reorder = async (collectionId, collectionPhotos, fromID, toID) => {
+    const fromIndex = collectionPhotos.findIndex(
+      (photo) => photo.id === fromID,
+    );
+    const toIndex = collectionPhotos.findIndex((photo) => photo.id === toID);
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+    const nextOrder = [...collectionPhotos];
+    nextOrder.splice(toIndex, 0, nextOrder.splice(fromIndex, 1)[0]);
+    setPendingCollection(collectionId);
+    setError(null);
+    try {
+      const updated = await api.reorderPhotos(collectionId, nextOrder);
+      const byID = new Map(updated.map((photo) => [photo.id, photo]));
+      setPhotos((current) =>
+        current.map((photo) => byID.get(photo.id) || photo),
+      );
+    } catch (reason) {
+      setError(reason);
+    } finally {
+      setPendingCollection(null);
+      setDraggedID(null);
+    }
+  };
+
+  const grouped = groupPhotosByCollection(photos);
   return (
     <Page>
-      <Box mb={7}>
-        <Heading size="lg">Photos</Heading>
-        <Text mt={2} color="whiteAlpha.700">
-          Inspect the current public metadata. Photo editing arrives with the
-          upload pipeline.
-        </Text>
-      </Box>
+      <Flex
+        justify="space-between"
+        align={{ base: "flex-start", sm: "center" }}
+        gap={4}
+        mb={7}
+        direction={{ base: "column", sm: "row" }}
+      >
+        <Box>
+          <Heading size="lg">Photos</Heading>
+          <Text mt={2} color="whiteAlpha.700">
+            Arrange works within each collection and manage publication
+            metadata.
+          </Text>
+        </Box>
+        <Button
+          leftIcon={<AddIcon />}
+          colorScheme="yellow"
+          as={RouterLink}
+          to="/photos/new"
+        >
+          New photo
+        </Button>
+      </Flex>
       <ErrorNotice error={error} />
       {loading ? <LoadingState /> : null}
       {!loading && !error && photos.length === 0 ? (
-        <EmptyState>No photos are available.</EmptyState>
+        <EmptyState>No photos have been created yet.</EmptyState>
       ) : null}
-      {!loading && !error && photos.length > 0 ? (
-        <Box
-          overflowX="auto"
-          borderWidth="1px"
-          borderColor="whiteAlpha.200"
-          borderRadius="md"
-        >
-          <Table variant="simple">
-            <Thead>
-              <Tr>
-                <Th>Order</Th>
-                <Th>Title</Th>
-                <Th>Collection</Th>
-                <Th>Year</Th>
-                <Th>Location</Th>
-                <Th>Featured</Th>
-                <Th aria-label="Actions" />
-              </Tr>
-            </Thead>
-            <Tbody>
-              {photos.map((photo) => (
-                <Tr key={photo.id} _hover={{ bg: "whiteAlpha.50" }}>
-                  <Td>{photo.order}</Td>
-                  <Td fontWeight="semibold">{photo.title}</Td>
-                  <Td>{photo.collectionId}</Td>
-                  <Td>{photo.year || "-"}</Td>
-                  <Td>{photo.location || "-"}</Td>
-                  <Td>{photo.featured ? "Yes" : "No"}</Td>
-                  <Td textAlign="right">
-                    <IconButton
-                      aria-label={`View ${photo.title}`}
-                      icon={<ViewIcon />}
-                      size="sm"
-                      variant="solid"
-                      colorScheme="green"
-                      onClick={() => navigate(`/photos/${photo.id}`)}
-                    />
-                  </Td>
-                </Tr>
-              ))}
-            </Tbody>
-          </Table>
-        </Box>
+      {!loading && !error ? (
+        <Stack spacing={8}>
+          {[...grouped.entries()].map(([collectionId, collectionPhotos]) => (
+            <Box
+              key={collectionId}
+              borderWidth="1px"
+              borderColor="whiteAlpha.200"
+              borderRadius="md"
+              overflowX="auto"
+            >
+              <Flex
+                px={5}
+                py={4}
+                align="center"
+                justify="space-between"
+                borderBottomWidth="1px"
+                borderColor="whiteAlpha.200"
+              >
+                <Heading size="sm">{collectionId}</Heading>
+                {pendingCollection === collectionId ? (
+                  <Spinner size="sm" color="gold.300" />
+                ) : null}
+              </Flex>
+              <Table variant="striped" colorScheme="whiteAlpha">
+                <Thead>
+                  <Tr
+                    bg="gray.300"
+                 >
+                    <Th aria-label="Reorder" />
+                    <Th>Preview</Th>
+                    <Th>Order</Th>
+                    <Th>Title</Th>
+                    <Th>Status</Th>
+                    <Th>Featured</Th>
+                    <Th aria-label="Actions" />
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {collectionPhotos
+                    .sort((left, right) => left.order - right.order)
+                    .map((photo, index) => (
+                      <Tr
+                        key={photo.id}
+                        draggable={!pendingCollection}
+                        onDragStart={() => setDraggedID(photo.id)}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={() =>
+                          reorder(
+                            collectionId,
+                            collectionPhotos,
+                            draggedID,
+                            photo.id,
+                          )
+                        }
+                        _hover={{ bg: "whiteAlpha.50" }}
+                      >
+                        <Td>
+                          <IconButton
+                            aria-label={`Drag ${photo.title}`}
+                            icon={<DragHandleIcon />}
+                            size="sm"
+                            variant="solid"
+                            colorScheme="green"
+                            cursor="grab"
+                          />
+                        </Td>
+                        <Td>
+                          <PhotoPreview photo={photo} api={api} size="48px" />
+                        </Td>
+                        <Td>{photo.order}</Td>
+                        <Td fontWeight="semibold">{photo.title}</Td>
+                        <Td>
+                            <PhotoStatus status={photo.status} />
+                            <ProcessingStatus status={photo.processingStatus} />
+                        </Td>
+                        <Td>{photo.featured ? "Yes" : "No"}</Td>
+                        <Td textAlign="right">
+                          <HStack justify="flex-end">
+                            <IconButton
+                              aria-label={`Move ${photo.title} up`}
+                              icon={<ArrowUpIcon />}
+                              size="sm"
+                              variant="solid"
+                              colorScheme="green"
+                              isDisabled={
+                                index === 0 ||
+                                pendingCollection === collectionId
+                              }
+                              onClick={() =>
+                                reorder(
+                                  collectionId,
+                                  collectionPhotos,
+                                  photo.id,
+                                  collectionPhotos[index - 1].id,
+                                )
+                              }
+                            />
+                            <IconButton
+                              aria-label={`Move ${photo.title} down`}
+                              icon={<ArrowDownIcon />}
+                              size="sm"
+                              variant="solid"
+                              colorScheme="yellow"
+                              isDisabled={
+                                index === collectionPhotos.length - 1 ||
+                                pendingCollection === collectionId
+                              }
+                              onClick={() =>
+                                reorder(
+                                  collectionId,
+                                  collectionPhotos,
+                                  photo.id,
+                                  collectionPhotos[index + 1].id,
+                                )
+                              }
+                            />
+                            <IconButton
+                              aria-label={`Edit ${photo.title}`}
+                              icon={<EditIcon />}
+                              size="sm"
+                              variant="solid"
+                              colorScheme="teal"
+                              onClick={() => navigate(`/photos/${photo.id}`)}
+                            />
+                          </HStack>
+                        </Td>
+                      </Tr>
+                    ))}
+                </Tbody>
+              </Table>
+            </Box>
+          ))}
+        </Stack>
       ) : null}
     </Page>
   );
 };
 
-const PhotoDetailPage = ({ api }) => {
-  const { id } = useParams();
-  const [photo, setPhoto] = useState(null);
+const usePhotoCollections = (api) => {
+  const [collections, setCollections] = useState([]);
   const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
-
   useEffect(() => {
-    let alive = true;
+    let active = true;
     api
-      .getPhoto(id)
-      .then((item) => alive && setPhoto(item))
-      .catch((reason) => alive && setError(reason))
-      .finally(() => alive && setLoading(false));
+      .listCollections()
+      .then((items) => active && setCollections(items))
+      .catch((reason) => active && setError(reason));
     return () => {
-      alive = false;
+      active = false;
     };
-  }, [api, id]);
+  }, [api]);
+  return { collections, collectionError: error };
+};
 
-  if (loading)
-    return (
-      <Page>
-        <LoadingState />
-      </Page>
-    );
-  if (error || !photo)
-    return (
-      <Page>
-        <ErrorNotice error={error} />
-      </Page>
-    );
+const PhotoCreatePage = ({ api }) => {
+  const { collections, collectionError } = usePhotoCollections(api);
+  const [collectionId, setCollectionId] = useState("");
+  const [pending, setPending] = useState(false);
+  const [uploadedPhotos, setUploadedPhotos] = useState([]);
+  const [error, setError] = useState(null);
 
-  const fields = [
-    ["Collection", photo.collectionId],
-    ["Description", photo.description || "-"],
-    ["Year", photo.year || "-"],
-    ["Location", photo.location || "-"],
-    ["Dimensions", `${photo.width} x ${photo.height}`],
-    ["Featured", photo.featured ? "Yes" : "No"],
-    ["Display order", photo.order],
-    ["Current image URL", photo.src],
-  ];
+  const upload = async (files) => {
+    if (!collectionId) {
+      setError(new Error("Choose a collection before adding images."));
+      return;
+    }
+    setPending(true);
+    setError(null);
+    try {
+      // Upload sequentially so each small collection stays comfortably inside
+      // the API and DynamoDB ordering limits, while still accepting a batch.
+      for (const file of files) {
+        const [details, uploadDetails] = await Promise.all([
+          imageDetails(file),
+          api.uploadOriginal(file),
+        ]);
+        const title = titleFromFilename(file.name) || "Untitled photo";
+        const photo = await api.createPhoto({
+          uploadId: uploadDetails.photoId,
+          originalKey: uploadDetails.originalKey,
+          title,
+          description: "",
+          collectionId,
+          width: details.width,
+          height: details.height,
+          year: "",
+          location: "",
+          featured: false,
+          order: 0,
+          altText: title,
+          tags: [],
+        });
+        // Preserve each completed draft immediately. If a later file fails,
+        // the operator can see the successful uploads instead of retrying the
+        // entire batch and accidentally creating duplicates.
+        setUploadedPhotos((current) => [photo, ...current]);
+      }
+    } catch (reason) {
+      setError(reason);
+    } finally {
+      setPending(false);
+    }
+  };
   return (
     <Page>
       <HStack spacing={3} mb={7}>
@@ -821,34 +1314,230 @@ const PhotoDetailPage = ({ api }) => {
           aria-label="Back to photos"
           icon={<ArrowBackIcon />}
           variant="solid"
-          colorScheme="pink"
+          colorScheme="yellow"
         />
-        <Heading size="lg">{photo.title}</Heading>
+        <Heading size="lg">Add photos</Heading>
       </HStack>
-      <VStack
-        align="stretch"
-        spacing={0}
-        borderWidth="1px"
-        borderColor="whiteAlpha.200"
-        borderRadius="md"
-        overflow="hidden"
-      >
-        {fields.map(([label, value], index) => (
-          <Box
-            key={label}
-            px={5}
-            py={4}
-            bg={index % 2 ? "whiteAlpha.50" : "transparent"}
+      <ErrorNotice error={error || collectionError} />
+      <Stack spacing={5} maxW="780px">
+        <FormControl isRequired>
+          <FormLabel>Collection</FormLabel>
+          <Select
+            value={collectionId}
+            onChange={(event) => setCollectionId(event.target.value)}
+            isDisabled={pending}
           >
-            <Text fontSize="sm" color="whiteAlpha.600">
-              {label}
-            </Text>
-            <Text mt={1} wordBreak="break-word">
-              {value}
-            </Text>
+            <option value="" disabled style={{ color: "gray" }}>
+              Choose a collection
+            </option>
+            {collections
+              .filter((collection) => collection.status !== "archived")
+              .map((collection) => (
+                <option
+                  key={collection.id}
+                  value={collection.id}
+                  style={{ color: "white", backgroundColor: "#1f2937" }}
+                >
+                  {collection.title}
+                </option>
+              ))}
+          </Select>
+        </FormControl>
+        <PhotoDropzone onSelect={upload} pending={pending} />
+        {uploadedPhotos.length > 0 ? (
+          <Stack spacing={3} pt={2}>
+            {uploadedPhotos.map((photo) => (
+              <HStack key={photo.id} spacing={3}>
+                <PhotoPreview photo={photo} api={api} size="56px" />
+                <Box>
+                  <Text fontWeight="semibold">{photo.title}</Text>
+                  <HStack spacing={2} mt={1}>
+                    <PhotoStatus status={photo.status} />
+                    <ProcessingStatus status={photo.processingStatus} />
+                  </HStack>
+                </Box>
+              </HStack>
+            ))}
+          </Stack>
+        ) : null}
+      </Stack>
+    </Page>
+  );
+};
+
+const PhotoDetailPage = ({ api }) => {
+  const { id } = useParams();
+  const { collections, collectionError } = usePhotoCollections(api);
+  const [photo, setPhoto] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState(false);
+  const toast = useToast();
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setPhoto(await api.getPhoto(id));
+    } catch (reason) {
+      setError(reason);
+    } finally {
+      setLoading(false);
+    }
+  }, [api, id]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  const handleMutationError = async (reason) => {
+    if (
+      reason instanceof GalleryApiError &&
+      reason.code === "version_conflict"
+    ) {
+      toast({
+        title: "Photo changed elsewhere",
+        description: "The latest server version has been loaded.",
+        status: "warning",
+        duration: 5000,
+        isClosable: true,
+      });
+      await load();
+    } else {
+      setError(reason);
+    }
+  };
+  const save = async (form) => {
+    setPending(true);
+    setError(null);
+    try {
+      setPhoto(await api.updatePhoto(id, form));
+      toast({
+        title: "Photo saved",
+        status: "success",
+        duration: 3000,
+        isClosable: true,
+      });
+    } catch (reason) {
+      await handleMutationError(reason);
+    } finally {
+      setPending(false);
+    }
+  };
+  const transition = async (action) => {
+    setPending(true);
+    setError(null);
+    try {
+      const updated =
+        action === "publish"
+          ? await api.publishPhoto(id, photo.version)
+          : action === "archive"
+            ? await api.archivePhoto(id, photo.version)
+            : await api.restorePhoto(id, photo.version);
+      setPhoto(updated);
+      toast({
+        title:
+          action === "publish"
+            ? "Photo published"
+            : action === "archive"
+              ? "Photo archived"
+              : "Photo restored as draft",
+        status: "success",
+        duration: 3000,
+        isClosable: true,
+      });
+    } catch (reason) {
+      await handleMutationError(reason);
+    } finally {
+      setPending(false);
+    }
+  };
+  if (loading)
+    return (
+      <Page>
+        <LoadingState />
+      </Page>
+    );
+  if (!photo)
+    return (
+      <Page>
+        <ErrorNotice error={error || collectionError} />
+      </Page>
+    );
+  const formValue = {
+    ...photo,
+    tags: photo.tags || [],
+    tagsText: (photo.tags || []).join(", "),
+  };
+  return (
+    <Page>
+      <Flex
+        justify="space-between"
+        align={{ base: "flex-start", sm: "center" }}
+        gap={4}
+        mb={7}
+        direction={{ base: "column", sm: "row" }}
+      >
+        <HStack spacing={3}>
+          <IconButton
+            as={RouterLink}
+            to="/photos"
+            aria-label="Back to photos"
+            icon={<ArrowBackIcon />}
+            variant="solid"
+            colorScheme="yellow"
+          />
+          <Box>
+            <Heading size="lg">Edit photo</Heading>
+            <HStack mt={1} spacing={3}>
+              <PhotoStatus status={photo.status} />
+              <ProcessingStatus status={photo.processingStatus} />
+              <Text color="whiteAlpha.600">Version {photo.version}</Text>
+            </HStack>
           </Box>
-        ))}
-      </VStack>
+        </HStack>
+        <HStack>
+          {photo.status === "draft" ? (
+            <Button
+              colorScheme="green"
+              onClick={() => transition("publish")}
+              isLoading={pending}
+              isDisabled={
+                photo.processingStatus &&
+                photo.processingStatus !== "ready" &&
+                photo.processingStatus !== "not_required"
+              }
+            >
+              Publish
+            </Button>
+          ) : null}
+          {photo.status === "draft" || photo.status === "published" ? (
+            <Button
+              colorScheme="orange"
+              onClick={() => transition("archive")}
+              isLoading={pending}
+            >
+              Archive
+            </Button>
+          ) : null}
+          {photo.status === "archived" ? (
+            <Button
+              colorScheme="blue"
+              onClick={() => transition("restore")}
+              isLoading={pending}
+            >
+              Restore
+            </Button>
+          ) : null}
+        </HStack>
+      </Flex>
+      <ErrorNotice error={error || collectionError} />
+      <PhotoForm
+        initialValue={formValue}
+        collections={collections}
+        onSubmit={save}
+        pending={pending}
+        submitLabel="Save changes"
+        readOnly={photo.status === "archived"}
+        api={api}
+      />
     </Page>
   );
 };
@@ -868,6 +1557,7 @@ export const AdminConsole = ({ api, user }) => (
         element={<CollectionEditPage api={api} />}
       />
       <Route path="/photos" element={<PhotosPage api={api} />} />
+      <Route path="/photos/new" element={<PhotoCreatePage api={api} />} />
       <Route path="/photos/:id" element={<PhotoDetailPage api={api} />} />
       <Route path="*" element={<Navigate to="/collections" replace />} />
     </Routes>

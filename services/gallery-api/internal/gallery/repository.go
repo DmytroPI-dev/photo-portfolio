@@ -38,12 +38,32 @@ type AdminCollectionRepository interface {
 	DeleteAdminCollection(ctx context.Context, collection AdminCollection) error
 }
 
+// AdminPhotoRepository owns canonical photo metadata. Public photo records are
+// derived from it only while a photo is published, matching the collection
+// publication model and keeping drafts private.
+type AdminPhotoRepository interface {
+	ListAdminPhotos(ctx context.Context) ([]AdminPhoto, error)
+	ListAdminPhotosByCollection(ctx context.Context, collectionID string) ([]AdminPhoto, error)
+	GetAdminPhotoByID(ctx context.Context, id string) (AdminPhoto, bool, error)
+	CreateAdminPhoto(ctx context.Context, photo AdminPhoto) error
+	UpdateAdminPhoto(ctx context.Context, previous, next AdminPhoto) error
+	ReorderAdminPhotos(ctx context.Context, previous, next []AdminPhoto) error
+}
+
+// AdminPhotoCollectionGuardRepository provides the stronger write path used
+// when a photo is public. It keeps a photo write conditional on the current
+// published collection revision so archive and publication cannot interleave.
+type AdminPhotoCollectionGuardRepository interface {
+	UpdateAdminPhotoForPublishedCollection(ctx context.Context, previous, next AdminPhoto, collection AdminCollection) error
+}
+
 type MemoryRepository struct {
 	collections       []Collection
 	collectionsBySlug map[string]Collection
 	photos            []Photo
 	photosByID        map[string]Photo
 	adminPhotos       []AdminPhoto
+	adminPhotosByID   map[string]AdminPhoto
 	adminCollections  []AdminCollection
 	adminByID         map[string]AdminCollection
 }
@@ -55,6 +75,7 @@ func NewMemoryRepository(collections []Collection, photos []Photo) *MemoryReposi
 		photos:            append([]Photo(nil), photos...),
 		photosByID:        make(map[string]Photo, len(photos)),
 		adminPhotos:       make([]AdminPhoto, 0, len(photos)),
+		adminPhotosByID:   make(map[string]AdminPhoto, len(photos)),
 		adminCollections:  make([]AdminCollection, 0, len(collections)),
 		adminByID:         make(map[string]AdminCollection, len(collections)),
 	}
@@ -76,14 +97,16 @@ func NewMemoryRepository(collections []Collection, photos []Photo) *MemoryReposi
 	}
 	for _, photo := range repository.photos {
 		repository.photosByID[photo.ID] = photo
-		repository.adminPhotos = append(repository.adminPhotos, AdminPhoto{
+		adminPhoto := AdminPhoto{
 			Photo:            photo,
 			Status:           PublicationPublished,
 			ProcessingStatus: ProcessingNotRequired,
 			AltText:          photo.Title,
 			Tags:             []string{},
 			Version:          1,
-		})
+		}
+		repository.adminPhotos = append(repository.adminPhotos, adminPhoto)
+		repository.adminPhotosByID[photo.ID] = adminPhoto
 	}
 
 	return repository
@@ -134,6 +157,68 @@ func (repository *MemoryRepository) ListAdminPhotosByCollection(_ context.Contex
 		}
 	}
 	return photos, nil
+}
+
+func (repository *MemoryRepository) ListAdminPhotos(_ context.Context) ([]AdminPhoto, error) {
+	photos := append([]AdminPhoto(nil), repository.adminPhotos...)
+	sort.Slice(photos, func(left, right int) bool {
+		if photos[left].CollectionID == photos[right].CollectionID {
+			return photos[left].Order < photos[right].Order
+		}
+		return photos[left].CollectionID < photos[right].CollectionID
+	})
+	return photos, nil
+}
+
+func (repository *MemoryRepository) GetAdminPhotoByID(_ context.Context, id string) (AdminPhoto, bool, error) {
+	photo, found := repository.adminPhotosByID[id]
+	return photo, found, nil
+}
+
+func (repository *MemoryRepository) CreateAdminPhoto(_ context.Context, photo AdminPhoto) error {
+	if _, found := repository.adminPhotosByID[photo.ID]; found {
+		return ErrAlreadyExists
+	}
+	repository.adminPhotos = append(repository.adminPhotos, photo)
+	repository.adminPhotosByID[photo.ID] = photo
+	return nil
+}
+
+func (repository *MemoryRepository) UpdateAdminPhoto(_ context.Context, previous, next AdminPhoto) error {
+	current, found := repository.adminPhotosByID[previous.ID]
+	if !found || current.Version != previous.Version {
+		return ErrVersionConflict
+	}
+
+	repository.replaceAdminPhoto(previous.ID, next)
+	repository.reconcilePublicPhoto(current, next)
+	return nil
+}
+
+func (repository *MemoryRepository) UpdateAdminPhotoForPublishedCollection(ctx context.Context, previous, next AdminPhoto, collection AdminCollection) error {
+	currentCollection, found := repository.adminByID[collection.ID]
+	if !found || currentCollection.Status != PublicationPublished || currentCollection.Version != collection.Version {
+		return ErrVersionConflict
+	}
+	return repository.UpdateAdminPhoto(ctx, previous, next)
+}
+
+func (repository *MemoryRepository) ReorderAdminPhotos(_ context.Context, previous, next []AdminPhoto) error {
+	if len(previous) != len(next) {
+		return ErrVersionConflict
+	}
+	for index, photo := range previous {
+		current, found := repository.adminPhotosByID[photo.ID]
+		if !found || current.Version != photo.Version || next[index].ID != photo.ID {
+			return ErrVersionConflict
+		}
+	}
+	for _, photo := range next {
+		current := repository.adminPhotosByID[photo.ID]
+		repository.replaceAdminPhoto(photo.ID, photo)
+		repository.reconcilePublicPhoto(current, photo)
+	}
+	return nil
 }
 
 func (repository *MemoryRepository) CreateAdminCollection(_ context.Context, collection AdminCollection) error {
@@ -206,4 +291,50 @@ func (repository *MemoryRepository) removePublicCollection(collection Collection
 		}
 	}
 	delete(repository.collectionsBySlug, collection.Slug)
+}
+
+func (repository *MemoryRepository) replaceAdminPhoto(id string, next AdminPhoto) {
+	for index, photo := range repository.adminPhotos {
+		if photo.ID == id {
+			repository.adminPhotos[index] = next
+			break
+		}
+	}
+	repository.adminPhotosByID[id] = next
+}
+
+func (repository *MemoryRepository) reconcilePublicPhoto(previous, next AdminPhoto) {
+	wasPublished := previous.Status == PublicationPublished
+	isPublished := next.Status == PublicationPublished
+	switch {
+	case wasPublished && !isPublished:
+		repository.removePublicPhoto(previous.Photo)
+	case !wasPublished && isPublished:
+		repository.photos = append(repository.photos, next.Photo)
+		repository.photosByID[next.ID] = next.Photo
+	case wasPublished && isPublished:
+		for index, photo := range repository.photos {
+			if photo.ID == previous.ID {
+				repository.photos[index] = next.Photo
+				break
+			}
+		}
+		repository.photosByID[next.ID] = next.Photo
+	}
+	sort.Slice(repository.photos, func(left, right int) bool {
+		if repository.photos[left].CollectionID == repository.photos[right].CollectionID {
+			return repository.photos[left].Order < repository.photos[right].Order
+		}
+		return repository.photos[left].CollectionID < repository.photos[right].CollectionID
+	})
+}
+
+func (repository *MemoryRepository) removePublicPhoto(photo Photo) {
+	for index, current := range repository.photos {
+		if current.ID == photo.ID {
+			repository.photos = append(repository.photos[:index], repository.photos[index+1:]...)
+			break
+		}
+	}
+	delete(repository.photosByID, photo.ID)
 }

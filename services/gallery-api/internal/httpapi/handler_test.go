@@ -1,14 +1,28 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/gallery"
+	"github.com/DmytroPI-dev/photo-portfolio/services/gallery-api/internal/storage"
 )
+
+type fakeOriginalStore struct{}
+
+func (fakeOriginalStore) PresignUpload(_ context.Context, key, _ string, maxBytes int64) (storage.PresignedUpload, error) {
+	return storage.PresignedUpload{URL: "https://uploads.example.test/" + key, Fields: map[string]string{"policy": "size-" + strconv.FormatInt(maxBytes, 10)}}, nil
+}
+
+func (fakeOriginalStore) PresignGet(_ context.Context, key string) (string, error) {
+	return "https://previews.example.test/" + key, nil
+}
 
 func TestHealth(t *testing.T) {
 	response := request(t, http.MethodGet, "/health")
@@ -204,6 +218,164 @@ func TestAdminCollectionCannotArchiveWithPublishedPhotos(t *testing.T) {
 	if body.Error.Code != "collection_has_published_photos" {
 		t.Fatalf("error code = %q, want collection_has_published_photos", body.Error.Code)
 	}
+}
+
+func TestAdminPhotoCRUDAndLifecycleReconcilesPublicCopies(t *testing.T) {
+	handler := NewHandler(gallery.NewSeedRepository())
+
+	created := requestWithHandler(t, handler, http.MethodPost, "/admin/photos", `{
+        "id":"fixture-photo","title":"Fixture Photo","description":"For console testing.","src":"/images/1.jpg",
+        "collectionId":"drawings","width":1350,"height":1800,"order":20,"altText":"Fixture image",
+        "tags":["fixture"," drawing "],"focalPointX":0.5,"focalPointY":0.5
+    }`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create photo status = %d, want %d; body = %s", created.Code, http.StatusCreated, created.Body.String())
+	}
+	var photo gallery.AdminPhoto
+	decodeJSON(t, created, &photo)
+	if photo.Status != gallery.PublicationDraft || photo.Version != 1 || photo.ID != "fixture-photo" || len(photo.Tags) != 2 {
+		t.Fatalf("created photo = %#v, want draft fixture photo", photo)
+	}
+
+	publicDetail := requestWithHandler(t, handler, http.MethodGet, "/photos/fixture-photo", "")
+	if publicDetail.Code != http.StatusNotFound {
+		t.Fatalf("draft public detail status = %d, want %d", publicDetail.Code, http.StatusNotFound)
+	}
+
+	published := requestWithHandler(t, handler, http.MethodPost, "/admin/photos/fixture-photo/publish", `{"version":1}`)
+	if published.Code != http.StatusOK {
+		t.Fatalf("publish photo status = %d, want %d; body = %s", published.Code, http.StatusOK, published.Body.String())
+	}
+	decodeJSON(t, published, &photo)
+	if photo.Status != gallery.PublicationPublished || photo.Version != 2 {
+		t.Fatalf("published photo = %#v, want published version 2", photo)
+	}
+
+	publicDetail = requestWithHandler(t, handler, http.MethodGet, "/photos/fixture-photo", "")
+	if publicDetail.Code != http.StatusOK {
+		t.Fatalf("published public detail status = %d, want %d; body = %s", publicDetail.Code, http.StatusOK, publicDetail.Body.String())
+	}
+
+	updated := requestWithHandler(t, handler, http.MethodPatch, "/admin/photos/fixture-photo", `{"title":"Moved Fixture","collectionId":"travel","order":30,"version":2}`)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("update photo status = %d, want %d; body = %s", updated.Code, http.StatusOK, updated.Body.String())
+	}
+	decodeJSON(t, updated, &photo)
+	if photo.Title != "Moved Fixture" || photo.CollectionID != "travel" || photo.Version != 3 {
+		t.Fatalf("updated photo = %#v, want moved published photo version 3", photo)
+	}
+
+	archived := requestWithHandler(t, handler, http.MethodPost, "/admin/photos/fixture-photo/archive", `{"version":3}`)
+	if archived.Code != http.StatusOK {
+		t.Fatalf("archive photo status = %d, want %d; body = %s", archived.Code, http.StatusOK, archived.Body.String())
+	}
+	publicDetail = requestWithHandler(t, handler, http.MethodGet, "/photos/fixture-photo", "")
+	if publicDetail.Code != http.StatusNotFound {
+		t.Fatalf("archived public detail status = %d, want %d", publicDetail.Code, http.StatusNotFound)
+	}
+
+	readOnly := requestWithHandler(t, handler, http.MethodPatch, "/admin/photos/fixture-photo", `{"title":"Nope","version":4}`)
+	if readOnly.Code != http.StatusConflict {
+		t.Fatalf("update archived photo status = %d, want %d; body = %s", readOnly.Code, http.StatusConflict, readOnly.Body.String())
+	}
+	assertErrorCode(t, readOnly, "archived_photo_read_only")
+
+	restored := requestWithHandler(t, handler, http.MethodPost, "/admin/photos/fixture-photo/restore", `{"version":4}`)
+	if restored.Code != http.StatusOK {
+		t.Fatalf("restore photo status = %d, want %d; body = %s", restored.Code, http.StatusOK, restored.Body.String())
+	}
+	decodeJSON(t, restored, &photo)
+	if photo.Status != gallery.PublicationDraft || photo.Version != 5 {
+		t.Fatalf("restored photo = %#v, want draft version 5", photo)
+	}
+}
+
+func TestAdminImageUploadCreatesPrivateDraftWithPreview(t *testing.T) {
+	handler := NewHandlerWithOriginals(gallery.NewSeedRepository(), fakeOriginalStore{})
+
+	prepared := requestWithHandler(t, handler, http.MethodPost, "/admin/uploads", `{"filename":"winter-study.JPG","contentType":"image/jpeg","size":2048}`)
+	if prepared.Code != http.StatusCreated {
+		t.Fatalf("prepare upload status = %d, want %d; body = %s", prepared.Code, http.StatusCreated, prepared.Body.String())
+	}
+	var upload createUploadResponse
+	decodeJSON(t, prepared, &upload)
+	if !strings.HasPrefix(upload.PhotoID, "photo-") || !strings.HasPrefix(upload.OriginalKey, "originals/"+upload.PhotoID+"/") || upload.UploadURL == "" {
+		t.Fatalf("upload preparation = %#v, want generated private upload details", upload)
+	}
+	if upload.UploadFields["policy"] != "size-26214400" {
+		t.Fatalf("upload fields = %#v, want constrained POST policy", upload.UploadFields)
+	}
+
+	created := requestWithHandler(t, handler, http.MethodPost, "/admin/photos", fmt.Sprintf(`{
+        "uploadId":%q,"originalKey":%q,"title":"Winter Study","collectionId":"drawings",
+        "width":1200,"height":1600,"altText":"Winter study","tags":["study"]
+    }`, upload.PhotoID, upload.OriginalKey))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create uploaded photo status = %d, want %d; body = %s", created.Code, http.StatusCreated, created.Body.String())
+	}
+	var photo gallery.AdminPhoto
+	decodeJSON(t, created, &photo)
+	if photo.ID != upload.PhotoID || photo.OriginalKey != upload.OriginalKey || photo.ProcessingStatus != gallery.ProcessingPending || photo.Order != 7 {
+		t.Fatalf("created uploaded photo = %#v, want private pending draft appended to drawings", photo)
+	}
+
+	preview := requestWithHandler(t, handler, http.MethodGet, "/admin/photos/"+photo.ID+"/preview", "")
+	if preview.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, want %d; body = %s", preview.Code, http.StatusOK, preview.Body.String())
+	}
+	var previewBody map[string]string
+	decodeJSON(t, preview, &previewBody)
+	if previewBody["url"] != "https://previews.example.test/"+upload.OriginalKey {
+		t.Fatalf("preview URL = %q, want signed private original", previewBody["url"])
+	}
+
+	publish := requestWithHandler(t, handler, http.MethodPost, "/admin/photos/"+photo.ID+"/publish", `{"version":1}`)
+	if publish.Code != http.StatusConflict {
+		t.Fatalf("publish pending photo status = %d, want %d; body = %s", publish.Code, http.StatusConflict, publish.Body.String())
+	}
+	assertErrorCode(t, publish, "image_not_ready")
+}
+
+func TestAdminPhotoReorderUpdatesPublicCollectionOrder(t *testing.T) {
+	handler := NewHandler(gallery.NewSeedRepository())
+	reordered := requestWithHandler(t, handler, http.MethodPost, "/admin/photos/reorder", `{
+        "collectionId":"drawings",
+        "photos":[
+            {"id":"drawing-02","version":1},
+            {"id":"drawing-01","version":1},
+            {"id":"drawing-03","version":1},
+            {"id":"drawing-04","version":1},
+            {"id":"drawing-05","version":1},
+            {"id":"drawing-06","version":1}
+        ]
+    }`)
+	if reordered.Code != http.StatusOK {
+		t.Fatalf("reorder status = %d, want %d; body = %s", reordered.Code, http.StatusOK, reordered.Body.String())
+	}
+
+	publicCollection := requestWithHandler(t, handler, http.MethodGet, "/collections/drawings", "")
+	if publicCollection.Code != http.StatusOK {
+		t.Fatalf("public collection status = %d, want %d", publicCollection.Code, http.StatusOK)
+	}
+	var detail gallery.CollectionDetail
+	decodeJSON(t, publicCollection, &detail)
+	if detail.Photos[0].ID != "drawing-02" || detail.Photos[1].ID != "drawing-01" {
+		t.Fatalf("reordered public photos = %#v, want drawing-02 then drawing-01", detail.Photos[:2])
+	}
+}
+
+func TestAdminPhotoReorderRejectsArchivedPhotos(t *testing.T) {
+	handler := NewHandler(gallery.NewSeedRepository())
+	archived := requestWithHandler(t, handler, http.MethodPost, "/admin/photos/drawing-01/archive", `{"version":1}`)
+	if archived.Code != http.StatusOK {
+		t.Fatalf("archive status = %d, want %d; body = %s", archived.Code, http.StatusOK, archived.Body.String())
+	}
+
+	reordered := requestWithHandler(t, handler, http.MethodPost, "/admin/photos/reorder", `{"collectionId":"drawings","photos":[{"id":"drawing-01","version":2}]}`)
+	if reordered.Code != http.StatusConflict {
+		t.Fatalf("reorder archived status = %d, want %d; body = %s", reordered.Code, http.StatusConflict, reordered.Body.String())
+	}
+	assertErrorCode(t, reordered, "archived_photo_read_only")
 }
 
 func TestArchivedCollectionIsReadOnlyAndCanBePermanentlyDeletedWithConfirmation(t *testing.T) {

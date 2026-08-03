@@ -22,7 +22,8 @@ resource "aws_lambda_function" "gallery_api" {
   # this in Lambda so production fails clearly rather than serving stale data.
   environment {
     variables = {
-      GALLERY_METADATA_TABLE = aws_dynamodb_table.gallery_metadata.name
+      GALLERY_METADATA_TABLE   = aws_dynamodb_table.gallery_metadata.name
+      GALLERY_ORIGINALS_BUCKET = aws_s3_bucket.gallery_originals.bucket
     }
   }
 
@@ -31,5 +32,6 @@ resource "aws_lambda_function" "gallery_api" {
     aws_iam_role_policy_attachment.gallery_api_basic_execution,
     aws_iam_role_policy.gallery_api_metadata_read,
     aws_iam_role_policy.gallery_api_metadata_write,
+    aws_iam_role_policy.gallery_api_originals,
   ]
 }

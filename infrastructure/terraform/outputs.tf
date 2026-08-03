@@ -13,6 +13,11 @@ output "metadata_table_name" {
   value       = aws_dynamodb_table.gallery_metadata.name
 }
 
+output "originals_bucket_name" {
+  description = "Private S3 bucket receiving administrator-uploaded original images."
+  value       = aws_s3_bucket.gallery_originals.bucket
+}
+
 output "metadata_table_arn" {
   description = "DynamoDB table ARN for the upcoming repository and seed command."
   value       = aws_dynamodb_table.gallery_metadata.arn

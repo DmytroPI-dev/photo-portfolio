@@ -3,6 +3,7 @@ package gallery
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -158,6 +159,28 @@ func TestDynamoRepositoryPaginatesAdminPhotosForOneCollection(t *testing.T) {
 	}
 }
 
+func TestDynamoRepositoryPaginatesAllAdminPhotos(t *testing.T) {
+	firstPhoto := AdminPhoto{Photo: Photo{ID: "drawing-01", CollectionID: "drawings", Order: 1}, Status: PublicationDraft}
+	secondPhoto := AdminPhoto{Photo: Photo{ID: "nature-01", CollectionID: "nature", Order: 1}, Status: PublicationArchived}
+	lastEvaluatedKey := key(adminPhotosPartition, "PHOTO#drawings#0001#drawing-01")
+	client := &dynamoStub{queryOutputs: []*dynamodb.QueryOutput{
+		{Items: []map[string]types.AttributeValue{marshalTestItem(t, firstPhoto, adminPhotosPartition, "PHOTO#drawings#0001#drawing-01")}, LastEvaluatedKey: lastEvaluatedKey},
+		{Items: []map[string]types.AttributeValue{marshalTestItem(t, secondPhoto, adminPhotosPartition, "PHOTO#nature#0001#nature-01")}},
+	}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	photos, err := repository.ListAdminPhotos(context.Background())
+	if err != nil {
+		t.Fatalf("ListAdminPhotos returned error: %v", err)
+	}
+	if len(photos) != 2 || photos[1].ID != "nature-01" {
+		t.Fatalf("photos = %#v, want both paginated photos", photos)
+	}
+	if len(client.queryInputs) != 2 {
+		t.Fatalf("query count = %d, want 2", len(client.queryInputs))
+	}
+}
+
 func TestDynamoRepositoryCreatesDraftCollectionWithoutPublicCopies(t *testing.T) {
 	collection := AdminCollection{
 		Collection: Collection{ID: "sketches", Slug: "sketches", Title: "Sketches", Order: 4},
@@ -184,6 +207,31 @@ func TestDynamoRepositoryCreatesDraftCollectionWithoutPublicCopies(t *testing.T)
 	}
 	if got := attributeString(t, index.Item["PK"]); got != adminCollectionsPartition {
 		t.Fatalf("index PK = %q, want %s", got, adminCollectionsPartition)
+	}
+}
+
+func TestDynamoRepositoryCreatesDraftPhotoWithoutPublicCopies(t *testing.T) {
+	photo := AdminPhoto{
+		Photo:            Photo{ID: "fixture-photo", Title: "Fixture", Src: "/images/1.jpg", CollectionID: "drawings", Width: 1350, Height: 1800, Order: 7},
+		Status:           PublicationDraft,
+		ProcessingStatus: ProcessingNotRequired,
+		Version:          1,
+	}
+	client := &dynamoStub{transactWriteOutput: &dynamodb.TransactWriteItemsOutput{}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	if err := repository.CreateAdminPhoto(context.Background(), photo); err != nil {
+		t.Fatalf("CreateAdminPhoto returned error: %v", err)
+	}
+	items := client.transactWriteInput.TransactItems
+	if len(items) != 2 || items[0].Put == nil || items[1].Put == nil {
+		t.Fatalf("transaction items = %#v, want canonical and private index puts", items)
+	}
+	if got := attributeString(t, items[0].Put.Item["PK"]); got != "PHOTO#fixture-photo" {
+		t.Fatalf("canonical PK = %q, want PHOTO#fixture-photo", got)
+	}
+	if got := attributeString(t, items[1].Put.Item["PK"]); got != adminPhotosPartition {
+		t.Fatalf("index PK = %q, want %s", got, adminPhotosPartition)
 	}
 }
 
@@ -302,6 +350,88 @@ func TestDynamoRepositoryReconcilesPublicCopiesForPublicationStateTransitions(t 
 	})
 }
 
+func TestDynamoRepositoryPublishesPhotoAndUpdatesPublicCopies(t *testing.T) {
+	previous := AdminPhoto{
+		Photo:            Photo{ID: "fixture-photo", Title: "Fixture", Src: "/images/1.jpg", CollectionID: "drawings", Width: 1350, Height: 1800, Order: 7},
+		Status:           PublicationDraft,
+		ProcessingStatus: ProcessingNotRequired,
+		Version:          1,
+	}
+	next := previous
+	next.Status = PublicationPublished
+	next.Version = 2
+	client := &dynamoStub{transactWriteOutput: &dynamodb.TransactWriteItemsOutput{}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	if err := repository.UpdateAdminPhoto(context.Background(), previous, next); err != nil {
+		t.Fatalf("UpdateAdminPhoto returned error: %v", err)
+	}
+	items := client.transactWriteInput.TransactItems
+	if len(items) != 4 {
+		t.Fatalf("transaction items = %d, want canonical, admin index, and two public puts", len(items))
+	}
+	if got := attributeString(t, items[2].Put.Item["PK"]); got != "PHOTO#fixture-photo" {
+		t.Fatalf("public metadata PK = %q, want PHOTO#fixture-photo", got)
+	}
+	if got := attributeString(t, items[3].Put.Item["PK"]); got != "COLLECTION#drawings" {
+		t.Fatalf("public collection index PK = %q, want COLLECTION#drawings", got)
+	}
+	if got := items[0].Put.ExpressionAttributeNames["#version"]; got != "Version" {
+		t.Fatalf("version condition attribute = %q, want Version", got)
+	}
+}
+
+func TestDynamoRepositoryGuardsPublishedPhotoWritesWithCollectionVersion(t *testing.T) {
+	previous := AdminPhoto{Photo: Photo{ID: "fixture-photo", Title: "Fixture", Src: "/images/1.jpg", CollectionID: "drawings", Width: 1350, Height: 1800, Order: 7}, Status: PublicationDraft, ProcessingStatus: ProcessingNotRequired, Version: 1}
+	next := previous
+	next.Status = PublicationPublished
+	next.Version = 2
+	collection := AdminCollection{Collection: Collection{ID: "drawings", Slug: "drawings", Order: 1}, Status: PublicationPublished, Version: 4}
+	client := &dynamoStub{transactWriteOutput: &dynamodb.TransactWriteItemsOutput{}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	if err := repository.UpdateAdminPhotoForPublishedCollection(context.Background(), previous, next, collection); err != nil {
+		t.Fatalf("UpdateAdminPhotoForPublishedCollection returned error: %v", err)
+	}
+	items := client.transactWriteInput.TransactItems
+	guard := items[len(items)-1].ConditionCheck
+	if guard == nil {
+		t.Fatalf("last transaction item = %#v, want published collection condition", items[len(items)-1])
+	}
+	if got := attributeString(t, guard.Key["PK"]); got != "COLLECTION#drawings" {
+		t.Fatalf("guard key = %q, want collection canonical key", got)
+	}
+	if got := attributeNumber(t, guard.ExpressionAttributeValues[":version"]); got != "4" {
+		t.Fatalf("guard version = %q, want 4", got)
+	}
+}
+
+func TestDynamoRepositorySplitsLargePhotoReordersIntoSafeTransactions(t *testing.T) {
+	previous := make([]AdminPhoto, 18)
+	next := make([]AdminPhoto, 18)
+	for index := range previous {
+		photo := AdminPhoto{Photo: Photo{ID: fmt.Sprintf("photo-%02d", index), Title: "Fixture", Src: "/images/1.jpg", CollectionID: "drawings", Width: 1350, Height: 1800, Order: index + 1}, Status: PublicationPublished, ProcessingStatus: ProcessingNotRequired, Version: 1}
+		previous[index] = photo
+		next[index] = photo
+		next[index].Order = len(previous) - index
+		next[index].Version = 2
+	}
+	client := &dynamoStub{transactWriteOutput: &dynamodb.TransactWriteItemsOutput{}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	if err := repository.ReorderAdminPhotos(context.Background(), previous, next); err != nil {
+		t.Fatalf("ReorderAdminPhotos returned error: %v", err)
+	}
+	if len(client.transactWriteInputs) != 2 {
+		t.Fatalf("transaction count = %d, want 2", len(client.transactWriteInputs))
+	}
+	for _, input := range client.transactWriteInputs {
+		if len(input.TransactItems) > 100 {
+			t.Fatalf("transaction contains %d items, want at most 100", len(input.TransactItems))
+		}
+	}
+}
+
 func TestDynamoRepositoryDeletesArchivedCollectionWithVersionCondition(t *testing.T) {
 	collection := AdminCollection{
 		Collection: Collection{ID: "sketches", Slug: "sketches", Title: "Sketches", Order: 4},
@@ -340,6 +470,7 @@ type dynamoStub struct {
 	queryInputs         []*dynamodb.QueryInput
 	queryOutputs        []*dynamodb.QueryOutput
 	transactWriteInput  *dynamodb.TransactWriteItemsInput
+	transactWriteInputs []*dynamodb.TransactWriteItemsInput
 	transactWriteOutput *dynamodb.TransactWriteItemsOutput
 	transactWriteErr    error
 }
@@ -360,6 +491,7 @@ func (stub *dynamoStub) Query(_ context.Context, input *dynamodb.QueryInput, _ .
 
 func (stub *dynamoStub) TransactWriteItems(_ context.Context, input *dynamodb.TransactWriteItemsInput, _ ...func(*dynamodb.Options)) (*dynamodb.TransactWriteItemsOutput, error) {
 	stub.transactWriteInput = input
+	stub.transactWriteInputs = append(stub.transactWriteInputs, input)
 	return stub.transactWriteOutput, stub.transactWriteErr
 }
 
