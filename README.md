@@ -21,17 +21,71 @@ The AWS metadata foundation is live in `eu-central-1`:
   previews and collection-scoped ordering
 - Terraform-managed budget alerts and Cost Anomaly Detection
 
-The next Terraform increment adds a private S3 originals bucket, direct
-pre-signed uploads, automatic image metadata, and short-lived admin previews.
-Uploaded photos remain private drafts until the subsequent processing increment
-produces public derivatives. Image processing, derivative generation, and
-CloudFront/S3 hosting for the public and admin SPAs are still outstanding. The
-public hostname continues to use its existing deployment while that work is
-planned.
+Private S3 originals, direct pre-signed uploads, automatic image metadata, and
+short-lived administrator previews are also deployed and smoke-tested. Uploaded
+photos remain private drafts until the subsequent processing increment produces
+public derivatives. Image processing, derivative generation, and CloudFront/S3
+hosting for the public and admin SPAs are still outstanding. The public hostname
+continues to use its existing deployment while that work is planned.
 
 The collection restore flow is deployed and smoke-tested. A future Cognito
 role increment will distinguish full `gallery-superuser` access from a
 photo-only editor role.
+
+## Planned Infrastructure
+
+Solid paths are deployed today. Dashed paths describe the next media-processing
+and AWS hosting increments; the public gallery remains on its existing Azure
+hosting until the CloudFront cutover is validated.
+
+```mermaid
+flowchart LR
+  visitor[Public visitor]
+  admin[Gallery administrator]
+
+  subgraph current[Deployed AWS services - eu-central-1]
+    cognito[Cognito<br/>PKCE + TOTP MFA]
+    api[API Gateway<br/>HTTP API]
+    lambda[Go Lambda API]
+    metadata[(DynamoDB<br/>metadata)]
+    originals[(Private S3<br/>originals)]
+  end
+
+  subgraph planned[Planned media and hosting]
+    uploads[S3 ObjectCreated]
+    queue[SQS queue + DLQ]
+    worker[Go/libvips<br/>image worker]
+    derivatives[(Private S3<br/>derivatives)]
+    media[CloudFront<br/>media distribution]
+    galleryHost[CloudFront + private S3<br/>public gallery]
+    adminHost[CloudFront + private S3<br/>admin console]
+  end
+
+  visitor -->|current Azure-hosted gallery| gallery[Public gallery SPA]
+  gallery -->|public metadata reads| api
+  admin -->|sign in| cognito
+  admin -->|admin console| adminApp[Chakra UI admin SPA]
+  adminHost -.->|planned production hosting| adminApp
+  adminApp -->|access token| api
+  api --> lambda
+  lambda --> metadata
+  lambda -->|pre-signed PUT / GET| originals
+  adminApp -->|direct private upload| originals
+
+  originals -.-> uploads
+  uploads -.-> queue
+  queue -.-> worker
+  worker -.->|derivatives + processing state| derivatives
+  worker -.-> metadata
+  derivatives -.-> media
+  media -.-> gallery
+  galleryHost -.-> gallery
+
+  classDef deployed fill:#173f3f,stroke:#67c6b8,color:#ffffff;
+  classDef planned fill:#382f58,stroke:#bba8ec,color:#ffffff;
+  class visitor,admin,gallery,cognito,api,lambda,metadata,originals deployed;
+  class uploads,queue,worker,derivatives,media,galleryHost,adminHost,adminApp planned;
+```
 
 ## Repository Layout
 
@@ -137,11 +191,10 @@ The Lambda artifact must be rebuilt before planning an API deployment:
 
 ## Next Work
 
-1. Apply and smoke-test the private-original upload increment.
-2. Add Cognito group authorization for superusers and photo editors.
-3. Add S3-to-SQS image processing with Go/libvips and responsive derivatives.
-4. Deploy public and admin builds to private S3 buckets behind CloudFront.
-5. Replace local frontend metadata and placeholder sources with the API and
+1. Add Cognito group authorization for superusers and photo editors.
+2. Add S3-to-SQS image processing with Go/libvips and responsive derivatives.
+3. Deploy public and admin builds to private S3 buckets behind CloudFront.
+4. Replace local frontend metadata and placeholder sources with the API and
    media distribution.
 
 Detailed architecture and implementation notes live in local `.codex/` files.
