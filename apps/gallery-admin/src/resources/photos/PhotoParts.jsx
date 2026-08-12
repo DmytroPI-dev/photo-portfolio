@@ -132,7 +132,10 @@ export const PhotoForm = ({ initialValue, collections, onSubmit, pending, submit
   return (
     <Box as="form" onSubmit={(event) => {
       event.preventDefault();
-      if (!readOnly) onSubmit({ ...form, tags: form.tagsText.split(",") });
+      if (!readOnly) {
+        const tags = form.tagsText.split(",").map((tag) => tag.trim()).filter(Boolean);
+        onSubmit({ ...form, tags });
+      }
     }}>
       <Stack spacing={5} maxW="780px">
         {form.previewURL || form.src || form.originalKey ? <PhotoPreview photo={form} api={api} size="180px" /> : null}
