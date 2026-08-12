@@ -88,7 +88,7 @@ const CollectionForm = ({
         </FormControl>
         <FormControl isRequired>
           <FormLabel>Display order</FormLabel>
-          <NumberInput min={1} value={form.order} isReadOnly={readOnly} onChange={(value) => setForm((current) => ({ ...current, order: value }))}>
+          <NumberInput min={1} value={form.order} isReadOnly={readOnly} onChange={(_, valueAsNumber) => setForm((current) => ({ ...current, order: Number.isFinite(valueAsNumber) ? valueAsNumber : current.order }))}>
             <NumberInputField />
           </NumberInput>
         </FormControl>
