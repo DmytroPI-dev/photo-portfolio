@@ -165,6 +165,11 @@ func (worker *Worker) ProcessObject(ctx context.Context, originalKey string) err
 	next.ProcessingStatus = gallery.ProcessingReady
 	next.ProcessingError = ""
 	next.DerivativeKey = largeKey
+	// TODO(media-delivery): Once CloudFront serves the private derivative bucket,
+	// update the publish transition to derive and persist the public Photo.Src
+	// from DerivativeKey and GALLERY_MEDIA_BASE_URL before publish validation.
+	// Do not expose the private S3 key here: readiness and public delivery are
+	// separate lifecycle steps.
 	next.Width = size.Width
 	next.Height = size.Height
 	next.Version++
@@ -207,8 +212,17 @@ func derivativeKey(photoID, variant string) string {
 
 func photoIDFromOriginalKey(originalKey string) (string, error) {
 	parts := strings.Split(originalKey, "/")
-	if len(parts) != 3 || parts[0] != "originals" || parts[1] == "" || !strings.HasPrefix(parts[2], "original") {
+	if len(parts) != 3 || parts[0] != "originals" || parts[1] == "" || !validOriginalFilename(parts[2]) {
 		return "", fmt.Errorf("unsupported original key %q", originalKey)
 	}
 	return parts[1], nil
+}
+
+func validOriginalFilename(filename string) bool {
+	switch filename {
+	case "original.jpg", "original.png", "original.webp":
+		return true
+	default:
+		return false
+	}
 }

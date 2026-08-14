@@ -32,7 +32,7 @@ func (store *ProcessingStore) Download(ctx context.Context, bucket, key, destina
 	}
 	defer object.Body.Close()
 
-	file, err := os.Create(destination)
+	file, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("create %q: %w", destination, err)
 	}

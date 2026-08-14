@@ -79,12 +79,15 @@ func TestWorkerDuplicateReadyDeliveryOnlyEnsuresLifecycleTag(t *testing.T) {
 }
 
 func TestPhotoIDFromOriginalKey(t *testing.T) {
-	photoID, err := photoIDFromOriginalKey("originals/photo-001/original.jpeg")
+	photoID, err := photoIDFromOriginalKey("originals/photo-001/original.jpg")
 	if err != nil || photoID != "photo-001" {
 		t.Fatalf("photoIDFromOriginalKey = %q, %v", photoID, err)
 	}
 	if _, err := photoIDFromOriginalKey("derivatives/photo-001/large.webp"); err == nil {
 		t.Fatal("photoIDFromOriginalKey accepted a derivative key")
+	}
+	if _, err := photoIDFromOriginalKey("originals/photo-001/original.jpeg"); err == nil {
+		t.Fatal("photoIDFromOriginalKey accepted an unsupported extension")
 	}
 }
 
@@ -96,14 +99,14 @@ func TestWorkerReportsOnlyFailedSQSRecordsForRetry(t *testing.T) {
 	response, err := worker.HandleSQSEvent(context.Background(), events.SQSEvent{Records: []events.SQSMessage{
 		{
 			MessageId: "valid-message",
-			Body:      `{"Records":[{"s3":{"bucket":{"name":"originals"},"object":{"key":"originals%2Fphoto-001%2Foriginal.jpeg"}}}]}`,
+			Body:      `{"Records":[{"s3":{"bucket":{"name":"wrong-bucket"},"object":{"key":"originals%2Fphoto-001%2Foriginal.jpg"}}},{"s3":{"bucket":{"name":"originals"},"object":{"key":"originals%2Fphoto-001%2Foriginal.jpg"}}}]}`,
 		},
 		{MessageId: "invalid-message", Body: `not-json`},
 	}})
 	if err != nil {
 		t.Fatalf("HandleSQSEvent returned error: %v", err)
 	}
-	if len(response.BatchItemFailures) != 1 || response.BatchItemFailures[0].ItemIdentifier != "invalid-message" {
+	if len(response.BatchItemFailures) != 2 || response.BatchItemFailures[0].ItemIdentifier != "valid-message" || response.BatchItemFailures[1].ItemIdentifier != "invalid-message" {
 		t.Fatalf("batch failures = %#v", response.BatchItemFailures)
 	}
 	if actual := repository.photos[photo.ID]; actual.ProcessingStatus != gallery.ProcessingReady {
@@ -116,7 +119,7 @@ func testPhoto() gallery.AdminPhoto {
 		Photo:            gallery.Photo{ID: "photo-001", Title: "Upload", CollectionID: "drawings", Width: 1, Height: 1, Order: 1},
 		Status:           gallery.PublicationDraft,
 		ProcessingStatus: gallery.ProcessingPending,
-		OriginalKey:      "originals/photo-001/original.jpeg",
+		OriginalKey:      "originals/photo-001/original.jpg",
 		Version:          2,
 	}
 }

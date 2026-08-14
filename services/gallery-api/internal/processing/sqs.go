@@ -19,20 +19,23 @@ func (worker *Worker) HandleSQSEvent(ctx context.Context, event events.SQSEvent)
 			response.BatchItemFailures = append(response.BatchItemFailures, events.SQSBatchItemFailure{ItemIdentifier: message.MessageId})
 			continue
 		}
+		messageFailed := false
 		for _, record := range notification.Records {
 			if record.S3.Bucket.Name != worker.originalsBucket {
-				response.BatchItemFailures = append(response.BatchItemFailures, events.SQSBatchItemFailure{ItemIdentifier: message.MessageId})
-				break
+				messageFailed = true
+				continue
 			}
 			objectKey, err := url.QueryUnescape(record.S3.Object.Key)
 			if err != nil {
-				response.BatchItemFailures = append(response.BatchItemFailures, events.SQSBatchItemFailure{ItemIdentifier: message.MessageId})
-				break
+				messageFailed = true
+				continue
 			}
 			if err := worker.ProcessObject(ctx, objectKey); err != nil {
-				response.BatchItemFailures = append(response.BatchItemFailures, events.SQSBatchItemFailure{ItemIdentifier: message.MessageId})
-				break
+				messageFailed = true
 			}
+		}
+		if messageFailed {
+			response.BatchItemFailures = append(response.BatchItemFailures, events.SQSBatchItemFailure{ItemIdentifier: message.MessageId})
 		}
 	}
 	return response, nil
