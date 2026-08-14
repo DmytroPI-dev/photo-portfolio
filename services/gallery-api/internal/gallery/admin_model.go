@@ -48,6 +48,7 @@ type AdminPhoto struct {
 	FocalPointY      float64           `json:"focalPointY"`
 	OriginalKey      string            `json:"originalKey"`
 	DerivativeKey    string            `json:"derivativeKey"`
+	ProcessingError  string            `json:"processingError"`
 	Version          int               `json:"version"`
 	CreatedAt        string            `json:"createdAt"`
 	UpdatedAt        string            `json:"updatedAt"`

@@ -2,3 +2,8 @@
 # notification addresses are personal operational contact information.
 billing_alert_email = "you@example.com"
 service_anomaly_monitor_arn = "arn:aws:ce::ACCOUNT_ID:anomalymonitor/MONITOR_ID"
+
+# Leave image_worker_image_uri unset for the first image-processing bootstrap
+# apply. After the ECR repository exists, set it to an immutable ARM64 digest,
+# for example: "ACCOUNT_ID.dkr.ecr.eu-central-1.amazonaws.com/REPOSITORY@sha256:..."
+# image_worker_image_uri = ""
