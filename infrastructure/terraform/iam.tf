@@ -82,3 +82,92 @@ resource "aws_iam_role_policy" "gallery_api_originals" {
   role   = aws_iam_role.gallery_api.id
   policy = data.aws_iam_policy_document.gallery_api_originals.json
 }
+
+# The worker has its own role, so a compromised image processor cannot mint
+# browser upload URLs or operate the API's Cognito-protected HTTP surface.
+data "aws_iam_policy_document" "gallery_image_worker_assume_role" {
+  statement {
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+
+    actions = ["sts:AssumeRole"]
+  }
+}
+
+resource "aws_iam_role" "gallery_image_worker" {
+  name               = "${local.name_prefix}-image-worker-lambda"
+  assume_role_policy = data.aws_iam_policy_document.gallery_image_worker_assume_role.json
+}
+
+resource "aws_iam_role_policy_attachment" "gallery_image_worker_basic_execution" {
+  role       = aws_iam_role.gallery_image_worker.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+data "aws_iam_policy_document" "gallery_image_worker_queue" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "sqs:ChangeMessageVisibility",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:ReceiveMessage",
+    ]
+    resources = [aws_sqs_queue.gallery_image_processing.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "gallery_image_worker_queue" {
+  name   = "${local.name_prefix}-image-worker-queue"
+  role   = aws_iam_role.gallery_image_worker.id
+  policy = data.aws_iam_policy_document.gallery_image_worker_queue.json
+}
+
+# Processing uses the same conditional canonical-photo updates as the admin
+# API. The narrow set mirrors its DynamoDB permissions instead of granting a
+# broad table policy.
+data "aws_iam_policy_document" "gallery_image_worker_metadata" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:PutItem",
+      "dynamodb:TransactWriteItems",
+    ]
+    resources = [aws_dynamodb_table.gallery_metadata.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "gallery_image_worker_metadata" {
+  name   = "${local.name_prefix}-image-worker-metadata"
+  role   = aws_iam_role.gallery_image_worker.id
+  policy = data.aws_iam_policy_document.gallery_image_worker_metadata.json
+}
+
+data "aws_iam_policy_document" "gallery_image_worker_objects" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "s3:GetObject",
+      "s3:PutObjectTagging",
+    ]
+    resources = ["${aws_s3_bucket.gallery_originals.arn}/originals/*"]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.gallery_derivatives.arn}/derivatives/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "gallery_image_worker_objects" {
+  name   = "${local.name_prefix}-image-worker-objects"
+  role   = aws_iam_role.gallery_image_worker.id
+  policy = data.aws_iam_policy_document.gallery_image_worker_objects.json
+}

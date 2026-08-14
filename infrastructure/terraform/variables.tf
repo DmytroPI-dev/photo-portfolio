@@ -40,6 +40,24 @@ variable "api_timeout_seconds" {
   default     = 10
 }
 
+variable "image_worker_image_uri" {
+  description = "Immutable ARM64 ECR image URI for the image worker. Leave empty for the initial queue and bucket bootstrap apply."
+  type        = string
+  default     = ""
+}
+
+variable "image_worker_memory_size" {
+  description = "Memory assigned to the libvips image worker in megabytes."
+  type        = number
+  default     = 2048
+}
+
+variable "image_worker_timeout_seconds" {
+  description = "Maximum duration for one image processing attempt."
+  type        = number
+  default     = 120
+}
+
 variable "log_retention_days" {
   description = "CloudWatch log retention for the API Lambda and HTTP API."
   type        = number

@@ -24,13 +24,16 @@ The AWS metadata foundation is live in `eu-central-1`:
 Private S3 originals, direct pre-signed uploads, automatic image metadata, and
 short-lived administrator previews are also deployed and smoke-tested. Uploaded
 photos remain private drafts until the subsequent processing increment produces
-public derivatives. Image processing, derivative generation, and CloudFront/S3
-hosting for the public and admin SPAs are still outstanding. The public hostname
-continues to use its existing deployment while that work is planned.
+public derivatives. The image-processing source and Terraform are ready for
+their first bootstrap deployment: a private JPEG/PNG/WebP input becomes
+orientation-corrected, responsive WebP derivatives, while camera RAW remains
+unsupported and source files never become public media. The new storage, queue,
+and worker have not been applied yet. CloudFront/S3 hosting for the public and
+admin SPAs is still outstanding; the public hostname continues to use its
+existing deployment while that work is completed.
 
-The collection restore flow is deployed and smoke-tested. A future Cognito
-role increment will distinguish full `gallery-superuser` access from a
-photo-only editor role.
+The collection restore flow is deployed and smoke-tested. Role-specific access
+for additional administrators is an optional future capability.
 
 ## Planned Infrastructure
 
@@ -55,6 +58,8 @@ flowchart LR
     uploads[S3 ObjectCreated]
     queue[SQS queue + DLQ]
     worker[Go/libvips<br/>image worker]
+    google[Google Photos<br/>Picker import]
+    importer[Google OAuth +<br/>import endpoint]
     derivatives[(Private S3<br/>derivatives)]
     media[CloudFront<br/>media distribution]
     galleryHost[CloudFront + private S3<br/>public gallery]
@@ -69,8 +74,11 @@ flowchart LR
   adminApp -->|access token| api
   api --> lambda
   lambda --> metadata
-  lambda -->|pre-signed PUT / GET| originals
+  lambda -->|pre-signed POST / GET| originals
   adminApp -->|direct private upload| originals
+  adminApp -.->|select a small set| google
+  google -.->|authorized selected media| importer
+  importer -.->|copy to private ingest| originals
 
   originals -.-> uploads
   uploads -.-> queue
@@ -84,7 +92,7 @@ flowchart LR
   classDef deployed fill:#173f3f,stroke:#67c6b8,color:#ffffff;
   classDef planned fill:#382f58,stroke:#bba8ec,color:#ffffff;
   class visitor,admin,gallery,cognito,api,lambda,metadata,originals deployed;
-  class uploads,queue,worker,derivatives,media,galleryHost,adminHost,adminApp planned;
+  class uploads,queue,worker,derivatives,media,galleryHost,adminHost,adminApp,google,importer planned;
 ```
 
 ## Repository Layout
@@ -95,6 +103,7 @@ apps/gallery-admin/               Cognito-protected Chakra UI console
 services/gallery-api/             Go HTTP API and Lambda entry point
 infrastructure/terraform/         AWS API, DynamoDB, Cognito, and budgets
 scripts/package-gallery-api.sh    ARM64 Lambda packaging helper
+THIRD_PARTY_NOTICES.md            Container dependency licence reminders
 .codex/                           local planning notes, intentionally ignored
 ```
 
@@ -191,10 +200,10 @@ The Lambda artifact must be rebuilt before planning an API deployment:
 
 ## Next Work
 
-1. Add Cognito group authorization for superusers and photo editors.
-2. Add S3-to-SQS image processing with Go/libvips and responsive derivatives.
+1. Bootstrap and deploy the S3-to-SQS Go/libvips worker, then smoke-test
+   normalized responsive WebP derivatives and the processing failure path.
+2. Add selective Google Photos import through the Picker API, copying only
+   administrator-selected images into the same private S3 processing flow.
 3. Deploy public and admin builds to private S3 buckets behind CloudFront.
 4. Replace local frontend metadata and placeholder sources with the API and
    media distribution.
-
-Detailed architecture and implementation notes live in local `.codex/` files.

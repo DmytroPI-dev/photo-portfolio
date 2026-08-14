@@ -18,6 +18,31 @@ output "originals_bucket_name" {
   value       = aws_s3_bucket.gallery_originals.bucket
 }
 
+output "derivatives_bucket_name" {
+  description = "Private S3 bucket for normalized image derivatives."
+  value       = aws_s3_bucket.gallery_derivatives.bucket
+}
+
+output "image_worker_repository_url" {
+  description = "ECR repository where the ARM64 image worker container is pushed."
+  value       = aws_ecr_repository.gallery_image_worker.repository_url
+}
+
+output "image_processing_queue_url" {
+  description = "SQS queue receiving S3 original-upload notifications."
+  value       = aws_sqs_queue.gallery_image_processing.url
+}
+
+output "image_processing_dlq_url" {
+  description = "SQS dead-letter queue for repeatedly failing image jobs."
+  value       = aws_sqs_queue.gallery_image_processing_dlq.url
+}
+
+output "image_worker_function_name" {
+  description = "Image worker Lambda name once an image URI has been supplied."
+  value       = try(aws_lambda_function.gallery_image_worker[0].function_name, null)
+}
+
 output "metadata_table_arn" {
   description = "DynamoDB table ARN for the upcoming repository and seed command."
   value       = aws_dynamodb_table.gallery_metadata.arn

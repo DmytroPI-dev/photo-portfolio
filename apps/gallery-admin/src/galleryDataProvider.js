@@ -142,6 +142,14 @@ export const GalleryApi = (apiBaseUrl, getAccessToken) => {
           size: file.size,
         },
       });
+
+      // The S3 bucket accepts only constrained POST forms. A missing field map
+      // means the deployed API ZIP still serves the superseded pre-signed PUT
+      // contract, so stop with an actionable error instead of leaking a vague
+      // Object.entries TypeError from the browser.
+      if (!upload?.uploadUrl || !upload?.photoId || !upload?.originalKey || !upload.uploadFields || typeof upload.uploadFields !== "object") {
+        throw new Error("The deployed gallery API returned an outdated upload contract. Rebuild the gallery API package and deploy its Terraform update.");
+      }
       const body = new FormData();
       Object.entries(upload.uploadFields).forEach(([name, value]) => body.append(name, value));
       body.append("file", file);
