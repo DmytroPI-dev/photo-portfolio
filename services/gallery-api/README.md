@@ -35,10 +35,10 @@ uploads directly to the encrypted private bucket, then creates a draft photo
 using the returned opaque upload fields.
 
 Camera RAW formats are intentionally unsupported. The 25 MB limit protects the
-upload path; it is not a public delivery format. The source includes a
-Go/libvips worker that creates normalized WebP derivatives and applies lifecycle
-cleanup to a successful private processing input. Its S3, SQS, derivative
-bucket, and container deployment still require the staged Terraform rollout.
+upload path; it is not a public delivery format. The deployed Go/libvips worker
+creates normalized WebP derivatives and applies lifecycle cleanup to a
+successful private processing input. Its S3, SQS, derivative bucket, and
+container Lambda path have passed a live upload smoke test.
 
 `GET /admin/photos/{id}/preview` returns a 10-minute authenticated preview URL
 for that private original. This deployed upload flow has been smoke-tested.
@@ -46,7 +46,10 @@ for that private original. This deployed upload flow has been smoke-tested.
 The local seed-only server intentionally has no bucket configured, so those
 two upload routes return `uploads_not_configured`. Public publishing remains
 blocked for uploaded drafts until the image-processing worker creates a
-derivative and marks the photo ready.
+derivative and marks the photo ready. It is then also blocked until
+`GALLERY_MEDIA_BASE_URL` names the public CloudFront media distribution backed
+by the private derivatives bucket; the API derives the server-managed public
+`Src` during the publish transition.
 
 ## Image worker
 

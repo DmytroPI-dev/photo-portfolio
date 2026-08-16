@@ -7,3 +7,15 @@ service_anomaly_monitor_arn = "arn:aws:ce::ACCOUNT_ID:anomalymonitor/MONITOR_ID"
 # apply. After the ECR repository exists, set it to an immutable ARM64 digest,
 # for example: "ACCOUNT_ID.dkr.ecr.eu-central-1.amazonaws.com/REPOSITORY@sha256:..."
 # image_worker_image_uri = ""
+
+# First apply creates the ACM certificate and outputs its DNS validation CNAME.
+# Create that CNAME in Cloudflare as DNS-only and wait for the certificate to
+# be issued. Then set this ARN and apply again to create CloudFront; uploaded
+# photo publishing remains disabled at this stage.
+# media_certificate_arn = "arn:aws:acm:us-east-1:ACCOUNT_ID:certificate/CERTIFICATE_ID"
+
+# Copy media_distribution_domain_name from the second apply into a DNS-only
+# Cloudflare CNAME for media_domain_name, then verify the hostname serves the
+# distribution. Set this only after that routing check and apply once more to
+# let the API publish CloudFront-backed derivative URLs.
+# media_delivery_ready = true

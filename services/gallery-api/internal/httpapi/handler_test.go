@@ -336,6 +336,91 @@ func TestAdminImageUploadCreatesPrivateDraftWithPreview(t *testing.T) {
 	assertErrorCode(t, publish, "image_not_ready")
 }
 
+func TestReadyUploadRequiresMediaDeliveryBeforePublishing(t *testing.T) {
+	repository := gallery.NewSeedRepository()
+	handler := NewHandlerWithOriginals(repository, fakeOriginalStore{})
+	photo := createReadyUploadedPhoto(t, handler, repository)
+
+	publish := requestWithHandler(t, handler, http.MethodPost, "/admin/photos/"+photo.ID+"/publish", fmt.Sprintf(`{"version":%d}`, photo.Version))
+	if publish.Code != http.StatusConflict {
+		t.Fatalf("publish without media delivery status = %d, want %d; body = %s", publish.Code, http.StatusConflict, publish.Body.String())
+	}
+	assertErrorCode(t, publish, "media_delivery_not_configured")
+}
+
+func TestReadyUploadPublishesItsCloudFrontDerivative(t *testing.T) {
+	repository := gallery.NewSeedRepository()
+	handler := NewHandlerWithOriginalsAndMediaBaseURL(repository, fakeOriginalStore{}, "https://media.example.test")
+	photo := createReadyUploadedPhoto(t, handler, repository)
+
+	publish := requestWithHandler(t, handler, http.MethodPost, "/admin/photos/"+photo.ID+"/publish", fmt.Sprintf(`{"version":%d}`, photo.Version))
+	if publish.Code != http.StatusOK {
+		t.Fatalf("publish ready upload status = %d, want %d; body = %s", publish.Code, http.StatusOK, publish.Body.String())
+	}
+	var published gallery.AdminPhoto
+	decodeJSON(t, publish, &published)
+	wantSource := "https://media.example.test/" + photo.DerivativeKey
+	if published.Src != wantSource || published.Status != gallery.PublicationPublished {
+		t.Fatalf("published upload = %#v, want source %q and published status", published, wantSource)
+	}
+
+	public := requestWithHandler(t, handler, http.MethodGet, "/photos/"+photo.ID, "")
+	if public.Code != http.StatusOK {
+		t.Fatalf("public detail status = %d, want %d; body = %s", public.Code, http.StatusOK, public.Body.String())
+	}
+	var publicPhoto gallery.Photo
+	decodeJSON(t, public, &publicPhoto)
+	if publicPhoto.Src != wantSource {
+		t.Fatalf("public source = %q, want %q", publicPhoto.Src, wantSource)
+	}
+
+	updated := requestWithHandler(t, handler, http.MethodPatch, "/admin/photos/"+photo.ID, fmt.Sprintf(`{"src":"https://untrusted.example.test/replaced.webp","version":%d}`, published.Version))
+	if updated.Code != http.StatusOK {
+		t.Fatalf("update published upload status = %d, want %d; body = %s", updated.Code, http.StatusOK, updated.Body.String())
+	}
+	var updatedPhoto gallery.AdminPhoto
+	decodeJSON(t, updated, &updatedPhoto)
+	if updatedPhoto.Src != wantSource {
+		t.Fatalf("updated admin source = %q, want %q", updatedPhoto.Src, wantSource)
+	}
+
+	public = requestWithHandler(t, handler, http.MethodGet, "/photos/"+photo.ID, "")
+	if public.Code != http.StatusOK {
+		t.Fatalf("public detail after update status = %d, want %d; body = %s", public.Code, http.StatusOK, public.Body.String())
+	}
+	decodeJSON(t, public, &publicPhoto)
+	if publicPhoto.Src != wantSource {
+		t.Fatalf("public source after update = %q, want %q", publicPhoto.Src, wantSource)
+	}
+}
+
+func createReadyUploadedPhoto(t *testing.T, handler http.Handler, repository *gallery.MemoryRepository) gallery.AdminPhoto {
+	t.Helper()
+	prepared := requestWithHandler(t, handler, http.MethodPost, "/admin/uploads", `{"filename":"winter-study.jpg","contentType":"image/jpeg","size":2048}`)
+	if prepared.Code != http.StatusCreated {
+		t.Fatalf("prepare upload status = %d, want %d; body = %s", prepared.Code, http.StatusCreated, prepared.Body.String())
+	}
+	var upload createUploadResponse
+	decodeJSON(t, prepared, &upload)
+
+	created := requestWithHandler(t, handler, http.MethodPost, "/admin/photos", fmt.Sprintf(`{"uploadId":%q,"originalKey":%q,"title":"Winter Study","collectionId":"drawings","width":1200,"height":1600,"altText":"Winter study"}`, upload.PhotoID, upload.OriginalKey))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create uploaded photo status = %d, want %d; body = %s", created.Code, http.StatusCreated, created.Body.String())
+	}
+	var photo gallery.AdminPhoto
+	decodeJSON(t, created, &photo)
+
+	ready := photo
+	ready.ProcessingStatus = gallery.ProcessingReady
+	ready.DerivativeKey = "derivatives/" + photo.ID + "/v1/large.webp"
+	ready.ProcessingError = ""
+	ready.Version++
+	if err := repository.UpdateAdminPhoto(context.Background(), photo, ready); err != nil {
+		t.Fatalf("mark uploaded photo ready: %v", err)
+	}
+	return ready
+}
+
 func TestAdminPhotoReorderUpdatesPublicCollectionOrder(t *testing.T) {
 	handler := NewHandler(gallery.NewSeedRepository())
 	reordered := requestWithHandler(t, handler, http.MethodPost, "/admin/photos/reorder", `{

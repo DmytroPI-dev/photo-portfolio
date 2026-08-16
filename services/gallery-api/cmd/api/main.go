@@ -23,8 +23,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("configure original image storage: %v", err)
 	}
+	mediaBaseURL, err := appconfig.MediaBaseURL()
+	if err != nil {
+		log.Fatalf("configure media delivery: %v", err)
+	}
 
-	handler := httpapi.NewHandlerWithOriginals(repository, originalStore)
+	handler := httpapi.NewHandlerWithOriginalsAndMediaBaseURL(repository, originalStore, mediaBaseURL)
 	if os.Getenv("AWS_LAMBDA_RUNTIME_API") != "" {
 		// provided.al2023 invokes the custom-runtime bootstrap binary through the
 		// Lambda Runtime API. The adapter preserves the local net/http handler so

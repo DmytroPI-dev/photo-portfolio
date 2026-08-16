@@ -19,3 +19,15 @@ provider "aws" {
     tags = local.tags
   }
 }
+
+# CloudFront only accepts ACM certificates issued in us-east-1, while the API,
+# storage, and processing stack intentionally remain in eu-central-1.
+provider "aws" {
+  alias   = "us_east_1"
+  region  = "us-east-1"
+  profile = var.aws_profile
+
+  default_tags {
+    tags = local.tags
+  }
+}

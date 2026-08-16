@@ -14,6 +14,12 @@ locals {
   # without borrowing any name from the separate Mandelbrot project.
   admin_cognito_domain = "${local.name_prefix}-admin-${data.aws_caller_identity.current.account_id}"
 
+  # Creating CloudFront and allowing the API to publish its hostname are
+  # separate operations: external DNS must route the custom hostname first.
+  media_distribution_enabled = trimspace(var.media_certificate_arn) != ""
+  media_publishing_enabled   = local.media_distribution_enabled && var.media_delivery_ready
+  media_base_url             = local.media_publishing_enabled ? "https://${var.media_domain_name}" : ""
+
   tags = {
     Project     = var.project
     Environment = var.environment
