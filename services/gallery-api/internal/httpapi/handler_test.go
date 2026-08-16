@@ -373,6 +373,25 @@ func TestReadyUploadPublishesItsCloudFrontDerivative(t *testing.T) {
 	if publicPhoto.Src != wantSource {
 		t.Fatalf("public source = %q, want %q", publicPhoto.Src, wantSource)
 	}
+
+	updated := requestWithHandler(t, handler, http.MethodPatch, "/admin/photos/"+photo.ID, fmt.Sprintf(`{"src":"https://untrusted.example.test/replaced.webp","version":%d}`, published.Version))
+	if updated.Code != http.StatusOK {
+		t.Fatalf("update published upload status = %d, want %d; body = %s", updated.Code, http.StatusOK, updated.Body.String())
+	}
+	var updatedPhoto gallery.AdminPhoto
+	decodeJSON(t, updated, &updatedPhoto)
+	if updatedPhoto.Src != wantSource {
+		t.Fatalf("updated admin source = %q, want %q", updatedPhoto.Src, wantSource)
+	}
+
+	public = requestWithHandler(t, handler, http.MethodGet, "/photos/"+photo.ID, "")
+	if public.Code != http.StatusOK {
+		t.Fatalf("public detail after update status = %d, want %d; body = %s", public.Code, http.StatusOK, public.Body.String())
+	}
+	decodeJSON(t, public, &publicPhoto)
+	if publicPhoto.Src != wantSource {
+		t.Fatalf("public source after update = %q, want %q", publicPhoto.Src, wantSource)
+	}
 }
 
 func createReadyUploadedPhoto(t *testing.T, handler http.Handler, repository *gallery.MemoryRepository) gallery.AdminPhoto {

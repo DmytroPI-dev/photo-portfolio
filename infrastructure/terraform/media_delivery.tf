@@ -15,7 +15,7 @@ resource "aws_acm_certificate" "gallery_media" {
 # certificate. The public hostname is a distinct media-only origin; neither the
 # Azure-hosted gallery nor the locally developed admin console changes here.
 resource "aws_cloudfront_origin_access_control" "gallery_media" {
-  count = local.media_delivery_enabled ? 1 : 0
+  count = local.media_distribution_enabled ? 1 : 0
 
   name                              = "${local.name_prefix}-gallery-media"
   description                       = "Signed CloudFront reads from private gallery derivatives."
@@ -28,7 +28,7 @@ resource "aws_cloudfront_origin_access_control" "gallery_media" {
 # authenticated or personalized. The header is required for Three.js/WebGL to
 # upload an Azure-hosted gallery image into a GPU texture without tainting it.
 resource "aws_cloudfront_response_headers_policy" "gallery_media_cors" {
-  count = local.media_delivery_enabled ? 1 : 0
+  count = local.media_distribution_enabled ? 1 : 0
 
   name    = "${local.name_prefix}-gallery-media-cors"
   comment = "Permit credential-free cross-origin WebGL texture loads."
@@ -52,11 +52,11 @@ resource "aws_cloudfront_response_headers_policy" "gallery_media_cors" {
 }
 
 resource "aws_cloudfront_distribution" "gallery_media" {
-  count = local.media_delivery_enabled ? 1 : 0
+  count = local.media_distribution_enabled ? 1 : 0
 
   enabled             = true
   is_ipv6_enabled     = true
-  comment             = "Private gallery derivative delivery."
+  comment             = "Public gallery derivative delivery from a private S3 origin."
   aliases             = [var.media_domain_name]
   default_root_object = ""
   price_class         = "PriceClass_All"
@@ -106,7 +106,7 @@ resource "aws_cloudfront_distribution" "gallery_media" {
 # Public access remains blocked at the bucket. This narrow policy authorizes
 # only signed reads sent by this exact media distribution to immutable outputs.
 data "aws_iam_policy_document" "gallery_derivatives_cloudfront" {
-  count = local.media_delivery_enabled ? 1 : 0
+  count = local.media_distribution_enabled ? 1 : 0
 
   statement {
     sid    = "AllowCloudFrontReadOnly"
@@ -129,7 +129,7 @@ data "aws_iam_policy_document" "gallery_derivatives_cloudfront" {
 }
 
 resource "aws_s3_bucket_policy" "gallery_derivatives_cloudfront" {
-  count = local.media_delivery_enabled ? 1 : 0
+  count = local.media_distribution_enabled ? 1 : 0
 
   bucket = aws_s3_bucket.gallery_derivatives.id
   policy = data.aws_iam_policy_document.gallery_derivatives_cloudfront[0].json

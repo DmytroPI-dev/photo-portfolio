@@ -47,8 +47,9 @@ The local seed-only server intentionally has no bucket configured, so those
 two upload routes return `uploads_not_configured`. Public publishing remains
 blocked for uploaded drafts until the image-processing worker creates a
 derivative and marks the photo ready. It is then also blocked until
-`GALLERY_MEDIA_BASE_URL` names the private CloudFront media distribution; the
-API derives the server-managed public `Src` during the publish transition.
+`GALLERY_MEDIA_BASE_URL` names the public CloudFront media distribution backed
+by the private derivatives bucket; the API derives the server-managed public
+`Src` during the publish transition.
 
 ## Image worker
 

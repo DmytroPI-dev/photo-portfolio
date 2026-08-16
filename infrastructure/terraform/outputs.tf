@@ -43,8 +43,8 @@ output "media_distribution_domain_name" {
 }
 
 output "media_base_url" {
-  description = "Public base URL the API uses for ready derivative sources after media delivery is enabled."
-  value       = local.media_delivery_enabled ? local.media_base_url : null
+  description = "Public base URL the API uses for ready derivative sources after DNS routing is verified and media_delivery_ready is enabled."
+  value       = local.media_publishing_enabled ? local.media_base_url : null
 }
 
 output "image_worker_repository_url" {

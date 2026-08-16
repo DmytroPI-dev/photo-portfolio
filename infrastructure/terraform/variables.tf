@@ -70,6 +70,12 @@ variable "media_certificate_arn" {
   default     = ""
 }
 
+variable "media_delivery_ready" {
+  description = "Set true only after media_domain_name is DNS-routed to the deployed CloudFront distribution and its public delivery has been verified. Enables uploaded-photo publishing."
+  type        = bool
+  default     = false
+}
+
 variable "log_retention_days" {
   description = "CloudWatch log retention for the API Lambda and HTTP API."
   type        = number
