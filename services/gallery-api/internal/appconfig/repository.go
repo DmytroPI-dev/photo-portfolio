@@ -3,6 +3,7 @@ package appconfig
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -44,4 +45,20 @@ func NewOriginalStore(ctx context.Context) (storage.Presigner, error) {
 		return nil, fmt.Errorf("load AWS SDK configuration for originals: %w", err)
 	}
 	return storage.NewOriginalStore(awsConfig, bucket), nil
+}
+
+// MediaBaseURL returns the public CloudFront base URL used only when a ready
+// uploaded photo is published. An empty value is valid for local development
+// and intentionally prevents uploaded drafts from being published.
+func MediaBaseURL() (string, error) {
+	raw := strings.TrimRight(strings.TrimSpace(os.Getenv("GALLERY_MEDIA_BASE_URL")), "/")
+	if raw == "" {
+		return "", nil
+	}
+
+	parsed, err := url.ParseRequestURI(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("GALLERY_MEDIA_BASE_URL must be an HTTPS origin without a query or fragment")
+	}
+	return parsed.Scheme + "://" + parsed.Host, nil
 }

@@ -14,6 +14,9 @@ locals {
   # without borrowing any name from the separate Mandelbrot project.
   admin_cognito_domain = "${local.name_prefix}-admin-${data.aws_caller_identity.current.account_id}"
 
+  media_delivery_enabled = trimspace(var.media_certificate_arn) != ""
+  media_base_url         = local.media_delivery_enabled ? "https://${var.media_domain_name}" : ""
+
   tags = {
     Project     = var.project
     Environment = var.environment

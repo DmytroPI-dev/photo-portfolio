@@ -22,24 +22,24 @@ The AWS metadata foundation is live in `eu-central-1`:
 - Terraform-managed budget alerts and Cost Anomaly Detection
 
 Private S3 originals, direct pre-signed uploads, automatic image metadata, and
-short-lived administrator previews are also deployed and smoke-tested. Uploaded
-photos remain private drafts until the subsequent processing increment produces
-public derivatives. The image-processing source and Terraform are ready for
-their first bootstrap deployment: a private JPEG/PNG/WebP input becomes
+short-lived administrator previews are also deployed and smoke-tested. The
+S3-to-SQS Go/libvips worker is deployed: accepted JPEG/PNG/WebP inputs become
 orientation-corrected, responsive WebP derivatives, while camera RAW remains
-unsupported and source files never become public media. The new storage, queue,
-and worker have not been applied yet. CloudFront/S3 hosting for the public and
-admin SPAs is still outstanding; the public hostname continues to use its
-existing deployment while that work is completed.
+unsupported and source files never become public media. A live upload verified
+the private `pending -> processing -> ready` flow, all three derivatives, and
+the successful-processing lifecycle tag. A ready upload remains a private draft
+until the upcoming CloudFront media distribution provides its public source
+URL. The gallery continues to use its existing Azure deployment; the admin SPA
+is not deployed yet.
 
 The collection restore flow is deployed and smoke-tested. Role-specific access
 for additional administrators is an optional future capability.
 
 ## Planned Infrastructure
 
-Solid paths are deployed today. Dashed paths describe the next media-processing
-and AWS hosting increments; the public gallery remains on its existing Azure
-hosting until the CloudFront cutover is validated.
+Solid paths are deployed today. Dashed paths describe the remaining media
+delivery, Google import, and hosting increments; the public gallery remains on
+its existing Azure hosting until a later CloudFront cutover is validated.
 
 ```mermaid
 flowchart LR
@@ -54,13 +54,16 @@ flowchart LR
     originals[(Private S3<br/>originals)]
   end
 
-  subgraph planned[Planned media and hosting]
+  subgraph deployedMedia[Deployed private media processing]
     uploads[S3 ObjectCreated]
     queue[SQS queue + DLQ]
     worker[Go/libvips<br/>image worker]
+    derivatives[(Private S3<br/>derivatives)]
+  end
+
+  subgraph planned[Planned delivery and hosting]
     google[Google Photos<br/>Picker import]
     importer[Google OAuth +<br/>import endpoint]
-    derivatives[(Private S3<br/>derivatives)]
     media[CloudFront<br/>media distribution]
     galleryHost[CloudFront + private S3<br/>public gallery]
     adminHost[CloudFront + private S3<br/>admin console]
@@ -91,8 +94,8 @@ flowchart LR
 
   classDef deployed fill:#173f3f,stroke:#67c6b8,color:#ffffff;
   classDef planned fill:#382f58,stroke:#bba8ec,color:#ffffff;
-  class visitor,admin,gallery,cognito,api,lambda,metadata,originals deployed;
-  class uploads,queue,worker,derivatives,media,galleryHost,adminHost,adminApp,google,importer planned;
+  class visitor,admin,gallery,cognito,api,lambda,metadata,originals,uploads,queue,worker,derivatives deployed;
+  class media,galleryHost,adminHost,adminApp,google,importer planned;
 ```
 
 ## Repository Layout
@@ -200,10 +203,11 @@ The Lambda artifact must be rebuilt before planning an API deployment:
 
 ## Next Work
 
-1. Bootstrap and deploy the S3-to-SQS Go/libvips worker, then smoke-test
-   normalized responsive WebP derivatives and the processing failure path.
-2. Add selective Google Photos import through the Picker API, copying only
+1. Deploy the private CloudFront media distribution, then derive each published
+   upload's public `Src` from its ready `DerivativeKey`.
+2. Smoke-test the image-processing failure/retry/DLQ path.
+3. Add selective Google Photos import through the Picker API, copying only
    administrator-selected images into the same private S3 processing flow.
-3. Deploy public and admin builds to private S3 buckets behind CloudFront.
-4. Replace local frontend metadata and placeholder sources with the API and
+4. Deploy public and admin builds to private S3 buckets behind CloudFront.
+5. Replace local frontend metadata and placeholder sources with the API and
    media distribution.

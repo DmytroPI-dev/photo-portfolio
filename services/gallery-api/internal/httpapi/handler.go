@@ -18,6 +18,7 @@ import (
 type Handler struct {
 	repository     gallery.Repository
 	originals      storage.Presigner
+	mediaBaseURL   string
 	allowedOrigins map[string]struct{}
 }
 
@@ -29,9 +30,17 @@ func NewHandler(repository gallery.Repository) http.Handler {
 // Passing nil deliberately leaves the local metadata-only server usable while
 // returning a clear response for upload-only routes.
 func NewHandlerWithOriginals(repository gallery.Repository, originals storage.Presigner) http.Handler {
+	return NewHandlerWithOriginalsAndMediaBaseURL(repository, originals, "")
+}
+
+// NewHandlerWithOriginalsAndMediaBaseURL adds the public media configuration
+// used when a processed upload crosses from a private draft into publication.
+// A blank mediaBaseURL is valid locally and keeps uploaded photos private.
+func NewHandlerWithOriginalsAndMediaBaseURL(repository gallery.Repository, originals storage.Presigner, mediaBaseURL string) http.Handler {
 	handler := &Handler{
-		repository: repository,
-		originals:  originals,
+		repository:   repository,
+		originals:    originals,
+		mediaBaseURL: strings.TrimRight(strings.TrimSpace(mediaBaseURL), "/"),
 		// API Gateway owns production CORS later. These local Vite origins make
 		// the service immediately useful without turning every local response
 		// into a permissive wildcard policy.
@@ -805,6 +814,11 @@ func (handler *Handler) updateAdminPhoto(writer http.ResponseWriter, request *ht
 	}
 
 	next := applyPhotoUpdate(current, input)
+	if current.Status == gallery.PublicationPublished && next.OriginalKey != "" {
+		// Uploaded photo sources are server-managed. Preserve the derivative URL
+		// when editing metadata instead of accepting a caller-provided Src.
+		next.Src = handler.mediaSource(next.DerivativeKey)
+	}
 	if !handler.validateAdminPhoto(writer, request, next, current.Status == gallery.PublicationPublished) {
 		return
 	}
@@ -870,6 +884,9 @@ func (handler *Handler) transitionAdminPhoto(writer http.ResponseWriter, request
 	}
 
 	next := current
+	if target == gallery.PublicationPublished && next.OriginalKey != "" {
+		next.Src = handler.mediaSource(next.DerivativeKey)
+	}
 	next.Status = target
 	next.Version++
 	next.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
@@ -1021,9 +1038,24 @@ func (handler *Handler) validateAdminPhoto(writer http.ResponseWriter, request *
 		writeError(writer, http.StatusBadRequest, "invalid_photo", "title, image, collection, and positive dimensions/order are required")
 		return false
 	}
-	if publishing && (photo.Src == "" || photo.ProcessingStatus != gallery.ProcessingReady && photo.ProcessingStatus != gallery.ProcessingNotRequired) {
-		writeError(writer, http.StatusConflict, "image_not_ready", "wait for image processing before publishing this photo")
-		return false
+	if publishing {
+		if photo.ProcessingStatus != gallery.ProcessingReady && photo.ProcessingStatus != gallery.ProcessingNotRequired {
+			writeError(writer, http.StatusConflict, "image_not_ready", "wait for image processing before publishing this photo")
+			return false
+		}
+		if photo.OriginalKey != "" {
+			if photo.DerivativeKey == "" {
+				writeError(writer, http.StatusConflict, "image_not_ready", "wait for image processing before publishing this photo")
+				return false
+			}
+			if handler.mediaSource(photo.DerivativeKey) == "" {
+				writeError(writer, http.StatusConflict, "media_delivery_not_configured", "public media delivery is not configured")
+				return false
+			}
+		} else if photo.Src == "" {
+			writeError(writer, http.StatusConflict, "image_not_ready", "photo source is required before publishing")
+			return false
+		}
 	}
 	collections, ok := handler.repository.(gallery.AdminCollectionRepository)
 	if !ok {
@@ -1044,6 +1076,13 @@ func (handler *Handler) validateAdminPhoto(writer http.ResponseWriter, request *
 		return false
 	}
 	return true
+}
+
+func (handler *Handler) mediaSource(derivativeKey string) string {
+	if handler.mediaBaseURL == "" || derivativeKey == "" {
+		return ""
+	}
+	return handler.mediaBaseURL + "/" + strings.TrimLeft(derivativeKey, "/")
 }
 
 func generatedPhotoID() (string, error) {

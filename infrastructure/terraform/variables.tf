@@ -58,6 +58,18 @@ variable "image_worker_timeout_seconds" {
   default     = 120
 }
 
+variable "media_domain_name" {
+  description = "Dedicated public hostname for immutable processed-image URLs. Cloudflare manages its DNS-only record."
+  type        = string
+  default     = "media.photo-gallery.i-dmytro.org"
+}
+
+variable "media_certificate_arn" {
+  description = "Issued us-east-1 ACM certificate ARN for media_domain_name. Leave empty during certificate DNS validation to defer the CloudFront distribution."
+  type        = string
+  default     = ""
+}
+
 variable "log_retention_days" {
   description = "CloudWatch log retention for the API Lambda and HTTP API."
   type        = number

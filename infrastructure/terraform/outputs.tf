@@ -23,6 +23,30 @@ output "derivatives_bucket_name" {
   value       = aws_s3_bucket.gallery_derivatives.bucket
 }
 
+output "media_certificate_arn" {
+  description = "ACM certificate ARN awaiting or completed DNS validation for the media hostname."
+  value       = aws_acm_certificate.gallery_media.arn
+}
+
+output "media_certificate_dns_validation" {
+  description = "CNAME record details to create in Cloudflare as DNS-only for ACM validation."
+  value = [for option in aws_acm_certificate.gallery_media.domain_validation_options : {
+    name  = option.resource_record_name
+    type  = option.resource_record_type
+    value = option.resource_record_value
+  }]
+}
+
+output "media_distribution_domain_name" {
+  description = "Generated CloudFront hostname for the media distribution after media_certificate_arn is configured."
+  value       = try(aws_cloudfront_distribution.gallery_media[0].domain_name, null)
+}
+
+output "media_base_url" {
+  description = "Public base URL the API uses for ready derivative sources after media delivery is enabled."
+  value       = local.media_delivery_enabled ? local.media_base_url : null
+}
+
 output "image_worker_repository_url" {
   description = "ECR repository where the ARM64 image worker container is pushed."
   value       = aws_ecr_repository.gallery_image_worker.repository_url

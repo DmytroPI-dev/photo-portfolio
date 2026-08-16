@@ -24,6 +24,9 @@ resource "aws_lambda_function" "gallery_api" {
     variables = {
       GALLERY_METADATA_TABLE   = aws_dynamodb_table.gallery_metadata.name
       GALLERY_ORIGINALS_BUCKET = aws_s3_bucket.gallery_originals.bucket
+      # The API leaves uploaded drafts unpublished until this is configured.
+      # It never treats the private S3 derivative key as a browser URL.
+      GALLERY_MEDIA_BASE_URL = local.media_base_url
     }
   }
 
