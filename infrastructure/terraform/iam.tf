@@ -45,11 +45,14 @@ resource "aws_iam_role_policy" "gallery_api_metadata_read" {
 # Collection edits are applied with one TransactWriteItems request so the
 # canonical record, private index, and any published public copies stay in
 # sync. DynamoDB also authorizes the PutItem and DeleteItem operations carried
-# by that transaction; no standalone UpdateItem or broad table access is used.
+# by that transaction. Publishing a photo also condition-checks its target
+# collection, so the role needs that DynamoDB action as well. No standalone
+# UpdateItem or broad table access is used.
 data "aws_iam_policy_document" "gallery_api_metadata_write" {
   statement {
     effect = "Allow"
     actions = [
+      "dynamodb:ConditionCheckItem",
       "dynamodb:DeleteItem",
       "dynamodb:PutItem",
       "dynamodb:TransactWriteItems",

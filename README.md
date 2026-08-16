@@ -27,24 +27,33 @@ S3-to-SQS Go/libvips worker is deployed: accepted JPEG/PNG/WebP inputs become
 orientation-corrected, responsive WebP derivatives, while camera RAW remains
 unsupported and source files never become public media. A live upload verified
 the private `pending -> processing -> ready` flow, all three derivatives, and
-the successful-processing lifecycle tag. A ready upload remains a private draft
-until the upcoming CloudFront media distribution provides its public source
-URL. The gallery continues to use its existing Azure deployment; the admin SPA
-is not deployed yet.
+the successful-processing lifecycle tag.
+
+CloudFront now delivers only immutable WebP derivatives from private S3 through
+Origin Access Control at `media.photo-gallery.i-dmytro.org`. Cloudflare is the
+DNS provider for that hostname and remains DNS-only; it does not proxy media.
+The distribution returns permissive, credential-free CORS headers so the
+Azure-hosted Three.js gallery can safely load images as GPU textures. The
+gallery still uses local metadata and placeholders until its API integration is
+implemented, while the admin SPA remains local-only.
 
 The collection restore flow is deployed and smoke-tested. Role-specific access
 for additional administrators is an optional future capability.
 
-## Planned Infrastructure
+## Infrastructure Architecture
 
-Solid paths are deployed today. Dashed paths describe the remaining media
-delivery, Google import, and hosting increments; the public gallery remains on
-its existing Azure hosting until a later CloudFront cutover is validated.
+Solid paths are deployed today. Dashed paths are deliberately deferred: Google
+Photos import and production hosting for the public and administrator SPAs.
 
 ```mermaid
-flowchart LR
+flowchart TD
   visitor[Public visitor]
   admin[Gallery administrator]
+  cloudflare[Cloudflare DNS<br/>DNS-only]
+
+  subgraph azure[Azure Static Web Apps]
+    gallery[Public gallery SPA]
+  end
 
   subgraph current[Deployed AWS services - eu-central-1]
     cognito[Cognito<br/>PKCE + TOTP MFA]
@@ -52,27 +61,29 @@ flowchart LR
     lambda[Go Lambda API]
     metadata[(DynamoDB<br/>metadata)]
     originals[(Private S3<br/>originals)]
+    media[CloudFront<br/>media distribution]
+    derivatives[(Private S3<br/>derivatives)]
   end
 
   subgraph deployedMedia[Deployed private media processing]
     uploads[S3 ObjectCreated]
     queue[SQS queue + DLQ]
     worker[Go/libvips<br/>image worker]
-    derivatives[(Private S3<br/>derivatives)]
   end
 
-  subgraph planned[Planned delivery and hosting]
+  subgraph planned[Deferred increments]
     google[Google Photos<br/>Picker import]
     importer[Google OAuth +<br/>import endpoint]
-    media[CloudFront<br/>media distribution]
     galleryHost[CloudFront + private S3<br/>public gallery]
     adminHost[CloudFront + private S3<br/>admin console]
   end
 
-  visitor -->|current Azure-hosted gallery| gallery[Public gallery SPA]
+  visitor -->|public gallery| gallery
   gallery -->|public metadata reads| api
+  gallery -.->|future API media URLs| media
+  cloudflare -->|DNS for media hostname| media
   admin -->|sign in| cognito
-  admin -->|admin console| adminApp[Chakra UI admin SPA]
+  admin -->|local admin console| adminApp[Chakra UI admin SPA]
   adminHost -.->|planned production hosting| adminApp
   adminApp -->|access token| api
   api --> lambda
@@ -88,14 +99,15 @@ flowchart LR
   queue -.-> worker
   worker -.->|derivatives + processing state| derivatives
   worker -.-> metadata
-  derivatives -.-> media
-  media -.-> gallery
+  derivatives -->|Origin Access Control| media
   galleryHost -.-> gallery
 
   classDef deployed fill:#173f3f,stroke:#67c6b8,color:#ffffff;
   classDef planned fill:#382f58,stroke:#bba8ec,color:#ffffff;
-  class visitor,admin,gallery,cognito,api,lambda,metadata,originals,uploads,queue,worker,derivatives deployed;
-  class media,galleryHost,adminHost,adminApp,google,importer planned;
+  classDef local fill:#3d3430,stroke:#d2a679,color:#ffffff;
+  class visitor,admin,gallery,cloudflare,cognito,api,lambda,metadata,originals,media,derivatives,uploads,queue,worker deployed;
+  class adminApp local;
+  class galleryHost,adminHost,google,importer planned;
 ```
 
 ## Repository Layout
@@ -107,7 +119,6 @@ services/gallery-api/             Go HTTP API and Lambda entry point
 infrastructure/terraform/         AWS API, DynamoDB, Cognito, and budgets
 scripts/package-gallery-api.sh    ARM64 Lambda packaging helper
 THIRD_PARTY_NOTICES.md            Container dependency licence reminders
-.codex/                           local planning notes, intentionally ignored
 ```
 
 ## Public Gallery Development
@@ -203,11 +214,9 @@ The Lambda artifact must be rebuilt before planning an API deployment:
 
 ## Next Work
 
-1. Deploy the private CloudFront media distribution, then derive each published
-   upload's public `Src` from its ready `DerivativeKey`.
+1. Connect the Azure gallery to public API metadata and CloudFront media URLs,
+   preserving local artwork as a fallback during the incremental migration.
 2. Smoke-test the image-processing failure/retry/DLQ path.
 3. Add selective Google Photos import through the Picker API, copying only
    administrator-selected images into the same private S3 processing flow.
 4. Deploy public and admin builds to private S3 buckets behind CloudFront.
-5. Replace local frontend metadata and placeholder sources with the API and
-   media distribution.

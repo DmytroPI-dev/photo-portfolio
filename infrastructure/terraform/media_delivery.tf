@@ -24,6 +24,33 @@ resource "aws_cloudfront_origin_access_control" "gallery_media" {
   signing_protocol                  = "sigv4"
 }
 
+# Public derivatives are safe to load cross-origin because they are not
+# authenticated or personalized. The header is required for Three.js/WebGL to
+# upload an Azure-hosted gallery image into a GPU texture without tainting it.
+resource "aws_cloudfront_response_headers_policy" "gallery_media_cors" {
+  count = local.media_delivery_enabled ? 1 : 0
+
+  name    = "${local.name_prefix}-gallery-media-cors"
+  comment = "Permit credential-free cross-origin WebGL texture loads."
+
+  cors_config {
+    access_control_allow_credentials = false
+    origin_override                  = true
+
+    access_control_allow_headers {
+      items = ["*"]
+    }
+
+    access_control_allow_methods {
+      items = ["GET", "HEAD", "OPTIONS"]
+    }
+
+    access_control_allow_origins {
+      items = ["*"]
+    }
+  }
+}
+
 resource "aws_cloudfront_distribution" "gallery_media" {
   count = local.media_delivery_enabled ? 1 : 0
 
@@ -48,10 +75,11 @@ resource "aws_cloudfront_distribution" "gallery_media" {
     target_origin_id = "gallery-derivatives-s3"
     compress         = true
 
-    viewer_protocol_policy = "redirect-to-https"
-    min_ttl                = 0
-    default_ttl            = 86400
-    max_ttl                = 31536000
+    viewer_protocol_policy     = "redirect-to-https"
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.gallery_media_cors[0].id
+    min_ttl                    = 0
+    default_ttl                = 86400
+    max_ttl                    = 31536000
 
     forwarded_values {
       query_string = false
