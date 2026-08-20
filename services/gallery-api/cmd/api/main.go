@@ -27,8 +27,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("configure media delivery: %v", err)
 	}
+	processingQueue, err := appconfig.NewProcessingQueue(context.Background())
+	if err != nil {
+		log.Fatalf("configure image-processing queue: %v", err)
+	}
+	assetDeleter, err := appconfig.NewPhotoAssetDeleter(context.Background())
+	if err != nil {
+		log.Fatalf("configure photo asset cleanup: %v", err)
+	}
 
-	handler := httpapi.NewHandlerWithOriginalsAndMediaBaseURL(repository, originalStore, mediaBaseURL)
+	handler := httpapi.NewHandlerWithAdminStorage(repository, originalStore, mediaBaseURL, processingQueue, assetDeleter)
 	if os.Getenv("AWS_LAMBDA_RUNTIME_API") != "" {
 		// provided.al2023 invokes the custom-runtime bootstrap binary through the
 		// Lambda Runtime API. The adapter preserves the local net/http handler so

@@ -64,6 +64,29 @@ const createPlacements = (photos) => {
 
 const floorAccents = ["#f2b263", "#daad7b", "#9ec6a3", "#9fb6df"];
 
+// The selected-work floor is a seven-slot overview, not a complete archive.
+// Take the newest display-ordered featured photo from every room first, then
+// fill remaining slots round-robin. This prevents a long-established category
+// from occupying all visible Home positions and keeps newly featured work in a
+// collection discoverable without increasing the 3D scene's safe image cap.
+const selectFeaturedPhotos = (orderedCollections, photosByCollection) => {
+  const queues = orderedCollections
+    .map((collection) => (photosByCollection.get(collection.id) ?? [])
+      .filter((photo) => photo.featured)
+      .sort((left, right) => right.order - left.order))
+    .filter((photos) => photos.length > 0);
+  const selected = [];
+
+  while (selected.length < MAX_PHOTOS_PER_FLOOR && queues.some((photos) => photos.length > 0)) {
+    for (const photos of queues) {
+      const photo = photos.shift();
+      if (photo) selected.push(photo);
+      if (selected.length === MAX_PHOTOS_PER_FLOOR) break;
+    }
+  }
+  return selected;
+};
+
 // Home is data-driven so newly published administrator collections can appear
 // without a separate frontend release. The familiar first "Selected Work"
 // floor remains, followed by the API's ordered published collections.
@@ -77,9 +100,7 @@ export const createHomeFloors = (collections, photos) => {
         .sort((left, right) => left.order - right.order),
     ])
   );
-  const featuredPhotos = photos
-    .filter((photo) => photo.featured)
-    .sort((left, right) => left.order - right.order);
+  const featuredPhotos = selectFeaturedPhotos(orderedCollections, photosByCollection);
   const firstCollection = orderedCollections[0];
 
   const floors = [

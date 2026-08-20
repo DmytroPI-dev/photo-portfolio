@@ -47,6 +47,50 @@ func NewOriginalStore(ctx context.Context) (storage.Presigner, error) {
 	return storage.NewOriginalStore(awsConfig, bucket), nil
 }
 
+// NewProcessingQueue configures explicit processing retries in AWS. It is nil
+// locally, where no SQS queue is present; the handler then returns a clear
+// configuration error instead of accepting a retry it cannot deliver.
+func NewProcessingQueue(ctx context.Context) (storage.ProcessingQueue, error) {
+	queueURL := strings.TrimSpace(os.Getenv("GALLERY_PROCESSING_QUEUE_URL"))
+	if queueURL == "" {
+		return nil, nil
+	}
+	bucket := strings.TrimSpace(os.Getenv("GALLERY_ORIGINALS_BUCKET"))
+	if bucket == "" {
+		return nil, fmt.Errorf("GALLERY_ORIGINALS_BUCKET is required when GALLERY_PROCESSING_QUEUE_URL is configured")
+	}
+
+	awsConfig, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load AWS SDK configuration for processing queue: %w", err)
+	}
+	return storage.NewSQSProcessingQueue(awsConfig, queueURL, bucket), nil
+}
+
+// NewPhotoAssetDeleter enables permanent cleanup for uploaded photos. Static
+// seed records have no private original and do not require this dependency.
+func NewPhotoAssetDeleter(ctx context.Context) (storage.PhotoAssetDeleter, error) {
+	originalsBucket := strings.TrimSpace(os.Getenv("GALLERY_ORIGINALS_BUCKET"))
+	if originalsBucket == "" {
+		return nil, nil
+	}
+	derivativesBucket := strings.TrimSpace(os.Getenv("GALLERY_DERIVATIVES_BUCKET"))
+	if derivativesBucket == "" {
+		return nil, fmt.Errorf("GALLERY_DERIVATIVES_BUCKET is required when GALLERY_ORIGINALS_BUCKET is configured")
+	}
+
+	awsConfig, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load AWS SDK configuration for photo cleanup: %w", err)
+	}
+	return storage.NewS3PhotoAssetDeleter(
+		awsConfig,
+		originalsBucket,
+		derivativesBucket,
+		strings.TrimSpace(os.Getenv("GALLERY_MEDIA_DISTRIBUTION_ID")),
+	), nil
+}
+
 // MediaBaseURL returns the public CloudFront base URL used only when a ready
 // uploaded photo is published. An empty value is valid for local development
 // and intentionally prevents uploaded drafts from being published.

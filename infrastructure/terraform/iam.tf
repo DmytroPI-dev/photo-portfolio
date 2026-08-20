@@ -86,6 +86,63 @@ resource "aws_iam_role_policy" "gallery_api_originals" {
   policy = data.aws_iam_policy_document.gallery_api_originals.json
 }
 
+# Admin retry requests may enqueue only an existing private original for the
+# dedicated worker. The API cannot inspect or consume queued jobs.
+data "aws_iam_policy_document" "gallery_api_processing_queue" {
+  statement {
+    effect    = "Allow"
+    actions   = ["sqs:SendMessage"]
+    resources = [aws_sqs_queue.gallery_image_processing.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "gallery_api_processing_queue" {
+  name   = "${local.name_prefix}-gallery-processing-queue"
+  role   = aws_iam_role.gallery_api.id
+  policy = data.aws_iam_policy_document.gallery_api_processing_queue.json
+}
+
+# Permanent deletion removes only this portfolio's private originals and
+# derivative outputs. ListBucket is constrained to the derivative bucket so
+# the API can clean an entire versioned photo prefix after a partial render.
+data "aws_iam_policy_document" "gallery_api_derivative_cleanup" {
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.gallery_originals.arn}/*"]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.gallery_derivatives.arn]
+  }
+
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.gallery_derivatives.arn}/derivatives/*"]
+  }
+
+
+  # No wildcard CloudFront permission is granted while delivery is deferred.
+  # Once a distribution exists, the API may invalidate only that distribution.
+  dynamic "statement" {
+    for_each = local.media_distribution_enabled ? [aws_cloudfront_distribution.gallery_media[0].arn] : []
+    content {
+      effect    = "Allow"
+      actions   = ["cloudfront:CreateInvalidation"]
+      resources = [statement.value]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "gallery_api_derivative_cleanup" {
+  name   = "${local.name_prefix}-gallery-derivative-cleanup"
+  role   = aws_iam_role.gallery_api.id
+  policy = data.aws_iam_policy_document.gallery_api_derivative_cleanup.json
+}
+
 # The worker has its own role, so a compromised image processor cannot mint
 # browser upload URLs or operate the API's Cognito-protected HTTP surface.
 data "aws_iam_policy_document" "gallery_image_worker_assume_role" {

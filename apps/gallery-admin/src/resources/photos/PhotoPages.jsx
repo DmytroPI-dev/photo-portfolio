@@ -15,6 +15,14 @@ import {
   Heading,
   HStack,
   IconButton,
+	Input,
+	Modal,
+	ModalBody,
+	ModalCloseButton,
+	ModalContent,
+	ModalFooter,
+	ModalHeader,
+	ModalOverlay,
   Select,
   Spinner,
   Stack,
@@ -26,6 +34,7 @@ import {
   Thead,
   Tr,
   useToast,
+	useDisclosure,
 } from "@chakra-ui/react";
 import { useCallback, useEffect, useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
@@ -33,6 +42,7 @@ import { EmptyState, ErrorNotice, LoadingState, Page, StatusBadge } from "../../
 import { GalleryApiError } from "../../galleryDataProvider";
 import {
   imageDetails,
+	GooglePhotosImport,
   PhotoDropzone,
   PhotoForm,
   PhotoPreview,
@@ -47,6 +57,40 @@ const groupPhotosByCollection = (photos) => photos.reduce((groups, photo) => {
   groups.set(photo.collectionId, group);
   return groups;
 }, new Map());
+
+const DeletePhotoControl = ({ photo, pending, onDelete }) => {
+  const { isOpen, onOpen, onClose } = useDisclosure();
+  const [confirmation, setConfirmation] = useState("");
+  const confirmed = confirmation === photo.id;
+  const close = () => {
+    setConfirmation("");
+    onClose();
+  };
+  const remove = async () => {
+    if (await onDelete(confirmation)) close();
+  };
+
+  return (
+    <>
+      <Button colorScheme="red" onClick={onOpen} isLoading={pending}>Delete</Button>
+      <Modal isOpen={isOpen} onClose={close} isCentered>
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader color="red.500">Delete photo</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <Text color="gray.800">This permanently removes the archived photo, its private original, and every generated derivative. Type <Text as="span" fontWeight="bold">{photo.id}</Text> to confirm.</Text>
+            <Input mt={4} value={confirmation} color={confirmed ? "green.500" : "red.500"} onChange={(event) => setConfirmation(event.target.value)} autoComplete="off" aria-label="Photo ID confirmation" />
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" mr={3} onClick={close}>Cancel</Button>
+            <Button colorScheme="red" onClick={remove} isDisabled={!confirmed || pending} isLoading={pending}>Permanently delete</Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+    </>
+  );
+};
 
 export const PhotosPage = ({ api }) => {
   const [photos, setPhotos] = useState([]);
@@ -210,6 +254,7 @@ export const PhotoCreatePage = ({ api }) => {
           </Select>
         </FormControl>
         <PhotoDropzone onSelect={upload} pending={pending} />
+		<GooglePhotosImport onSelect={upload} onError={setError} pending={pending} disabled={!collectionId} />
         {uploadedPhotos.length > 0 ? (
           <Stack spacing={3} pt={2}>
             {uploadedPhotos.map((photo) => (
@@ -227,6 +272,7 @@ export const PhotoCreatePage = ({ api }) => {
 
 export const PhotoDetailPage = ({ api }) => {
   const { id } = useParams();
+	const navigate = useNavigate();
   const { collections, collectionError } = usePhotoCollections(api);
   const [photo, setPhoto] = useState(null);
   const [error, setError] = useState(null);
@@ -283,6 +329,36 @@ export const PhotoDetailPage = ({ api }) => {
       setPending(false);
     }
   };
+  const retryProcessing = async () => {
+    setPending(true);
+    setError(null);
+    try {
+      const response = await api.retryPhotoProcessing(id, photo.version);
+      // The existing photo remains displayed while the asynchronous worker
+      // starts. A reload later shows processing, ready, or a new failure.
+      setPhoto(response.photo);
+      toast({ title: "Processing retry queued", description: "The image will refresh when the worker finishes.", status: "success", duration: 4000, isClosable: true });
+    } catch (reason) {
+      await handleMutationError(reason);
+    } finally {
+      setPending(false);
+    }
+  };
+  const remove = async (confirmationId) => {
+    setPending(true);
+    setError(null);
+    try {
+      await api.deletePhoto(id, photo.version, confirmationId);
+      toast({ title: "Photo permanently deleted", status: "success", duration: 3000, isClosable: true });
+      navigate("/photos", { replace: true });
+      return true;
+    } catch (reason) {
+      await handleMutationError(reason);
+      return false;
+    } finally {
+      setPending(false);
+    }
+  };
 
   if (loading) return <Page><LoadingState /></Page>;
   if (!photo) return <Page><ErrorNotice error={error || collectionError} /></Page>;
@@ -299,9 +375,10 @@ export const PhotoDetailPage = ({ api }) => {
           </Box>
         </HStack>
         <HStack>
+		  {(photo.processingStatus === "pending" || photo.processingStatus === "failed") && photo.originalKey ? <Button colorScheme="yellow" onClick={retryProcessing} isLoading={pending}>Retry processing</Button> : null}
           {photo.status === "draft" ? <Button colorScheme="green" onClick={() => transition("publish")} isLoading={pending} isDisabled={photo.processingStatus && photo.processingStatus !== "ready" && photo.processingStatus !== "not_required"}>Publish</Button> : null}
           {photo.status === "draft" || photo.status === "published" ? <Button colorScheme="orange" onClick={() => transition("archive")} isLoading={pending}>Archive</Button> : null}
-          {photo.status === "archived" ? <Button colorScheme="blue" onClick={() => transition("restore")} isLoading={pending}>Restore</Button> : null}
+          {photo.status === "archived" ? <><Button colorScheme="blue" onClick={() => transition("restore")} isLoading={pending}>Restore</Button><DeletePhotoControl photo={photo} pending={pending} onDelete={remove} /></> : null}
         </HStack>
       </Flex>
       <ErrorNotice error={error || collectionError} />

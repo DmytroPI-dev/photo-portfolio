@@ -460,6 +460,34 @@ func TestDynamoRepositoryDeletesArchivedCollectionWithVersionCondition(t *testin
 	}
 }
 
+func TestDynamoRepositoryDeletesArchivedPhotoWithVersionCondition(t *testing.T) {
+	photo := AdminPhoto{
+		Photo:   Photo{ID: "photo-123", CollectionID: "drawings", Order: 7},
+		Status:  PublicationArchived,
+		Version: 4,
+	}
+	client := &dynamoStub{transactWriteOutput: &dynamodb.TransactWriteItemsOutput{}}
+	repository := NewDynamoRepository(client, "gallery-metadata")
+
+	if err := repository.DeleteAdminPhoto(context.Background(), photo); err != nil {
+		t.Fatalf("DeleteAdminPhoto returned error: %v", err)
+	}
+	items := client.transactWriteInput.TransactItems
+	if len(items) != 2 || items[0].Delete == nil || items[1].Delete == nil {
+		t.Fatalf("transaction items = %#v, want canonical and index deletes", items)
+	}
+	canonical := items[0].Delete
+	if got := attributeString(t, canonical.Key["PK"]); got != "PHOTO#photo-123" {
+		t.Fatalf("canonical delete PK = %q, want PHOTO#photo-123", got)
+	}
+	if got := attributeNumber(t, canonical.ExpressionAttributeValues[":version"]); got != "4" {
+		t.Fatalf("version condition = %q, want 4", got)
+	}
+	if got := attributeString(t, items[1].Delete.Key["SK"]); got != "PHOTO#drawings#0007#photo-123" {
+		t.Fatalf("admin index SK = %q, want private photo index", got)
+	}
+}
+
 type dynamoStub struct {
 	getInput            *dynamodb.GetItemInput
 	getOutput           *dynamodb.GetItemOutput

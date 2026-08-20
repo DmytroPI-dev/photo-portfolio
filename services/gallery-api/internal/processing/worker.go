@@ -165,11 +165,9 @@ func (worker *Worker) ProcessObject(ctx context.Context, originalKey string) err
 	next.ProcessingStatus = gallery.ProcessingReady
 	next.ProcessingError = ""
 	next.DerivativeKey = largeKey
-	// TODO(media-delivery): Once CloudFront serves the private derivative bucket,
-	// update the publish transition to derive and persist the public Photo.Src
-	// from DerivativeKey and GALLERY_MEDIA_BASE_URL before publish validation.
-	// Do not expose the private S3 key here: readiness and public delivery are
-	// separate lifecycle steps.
+	// Do not expose a private derivative key as Photo.Src. The API derives the
+	// public CloudFront URL from DerivativeKey only during the publish transition,
+	// after this worker has made every derivative available.
 	next.Width = size.Width
 	next.Height = size.Height
 	next.Version++

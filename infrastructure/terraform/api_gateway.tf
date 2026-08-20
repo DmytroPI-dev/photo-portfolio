@@ -217,6 +217,28 @@ resource "aws_apigatewayv2_route" "admin_photo_restore" {
   authorization_scopes = ["gallery/publish"]
 }
 
+# Permanent deletion is a publish-level lifecycle action. The handler accepts
+# it only for archived photos with a version and exact typed ID confirmation.
+resource "aws_apigatewayv2_route" "admin_photo_delete" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "DELETE /admin/photos/{id}"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/publish"]
+}
+
+# Retrying an existing private original starts no publication transition. It is
+# a write action because it schedules worker capacity and changes no public data.
+resource "aws_apigatewayv2_route" "admin_photo_retry" {
+  api_id               = aws_apigatewayv2_api.gallery.id
+  route_key            = "POST /admin/photos/{id}/retry"
+  target               = "integrations/${aws_apigatewayv2_integration.gallery_api.id}"
+  authorization_type   = "JWT"
+  authorizer_id        = aws_apigatewayv2_authorizer.gallery_admin.id
+  authorization_scopes = ["gallery/write"]
+}
+
 resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.gallery.id
   name        = "$default"

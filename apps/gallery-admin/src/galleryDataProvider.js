@@ -190,6 +190,20 @@ export const GalleryApi = (apiBaseUrl, getAccessToken) => {
         body: { version },
       }),
 
+    deletePhoto: (id, version, confirmationId) =>
+      request(`/admin/photos/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        body: { version, confirmationId },
+      }),
+
+    // The worker, rather than the browser, owns the resulting processing state.
+    // A successful response means SQS accepted recovery work for this original.
+    retryPhotoProcessing: (id, version) =>
+      request(`/admin/photos/${encodeURIComponent(id)}/retry`, {
+        method: "POST",
+        body: { version },
+      }),
+
     async reorderPhotos(collectionId, photos) {
       const response = await request("/admin/photos/reorder", {
         method: "POST",

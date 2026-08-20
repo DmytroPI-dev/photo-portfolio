@@ -24,6 +24,34 @@ func (fakeOriginalStore) PresignGet(_ context.Context, key string) (string, erro
 	return "https://previews.example.test/" + key, nil
 }
 
+type fakeProcessingQueue struct {
+	keys []string
+	err  error
+}
+
+type fakePhotoAssetDeleter struct {
+	photoID     string
+	originalKey string
+	err         error
+}
+
+func (deleter *fakePhotoAssetDeleter) DeletePhotoAssets(_ context.Context, photoID, originalKey string) error {
+	if deleter.err != nil {
+		return deleter.err
+	}
+	deleter.photoID = photoID
+	deleter.originalKey = originalKey
+	return nil
+}
+
+func (queue *fakeProcessingQueue) EnqueueOriginal(_ context.Context, key string) error {
+	if queue.err != nil {
+		return queue.err
+	}
+	queue.keys = append(queue.keys, key)
+	return nil
+}
+
 func TestHealth(t *testing.T) {
 	response := request(t, http.MethodGet, "/health")
 
@@ -391,6 +419,85 @@ func TestReadyUploadPublishesItsCloudFrontDerivative(t *testing.T) {
 	decodeJSON(t, public, &publicPhoto)
 	if publicPhoto.Src != wantSource {
 		t.Fatalf("public source after update = %q, want %q", publicPhoto.Src, wantSource)
+	}
+}
+
+func TestAdminPhotoRetryQueuesPendingOriginal(t *testing.T) {
+	repository := gallery.NewSeedRepository()
+	queue := &fakeProcessingQueue{}
+	handler := NewHandlerWithOriginalsMediaAndQueue(repository, fakeOriginalStore{}, "https://media.example.test", queue)
+
+	prepared := requestWithHandler(t, handler, http.MethodPost, "/admin/uploads", `{"filename":"retry.jpg","contentType":"image/jpeg","size":2048}`)
+	if prepared.Code != http.StatusCreated {
+		t.Fatalf("prepare upload status = %d, want %d; body = %s", prepared.Code, http.StatusCreated, prepared.Body.String())
+	}
+	var upload createUploadResponse
+	decodeJSON(t, prepared, &upload)
+	created := requestWithHandler(t, handler, http.MethodPost, "/admin/photos", fmt.Sprintf(`{"uploadId":%q,"originalKey":%q,"title":"Retry","collectionId":"drawings","width":1200,"height":1600,"altText":"Retry"}`, upload.PhotoID, upload.OriginalKey))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create uploaded photo status = %d, want %d; body = %s", created.Code, http.StatusCreated, created.Body.String())
+	}
+
+	retry := requestWithHandler(t, handler, http.MethodPost, "/admin/photos/"+upload.PhotoID+"/retry", `{"version":1}`)
+	if retry.Code != http.StatusAccepted {
+		t.Fatalf("retry status = %d, want %d; body = %s", retry.Code, http.StatusAccepted, retry.Body.String())
+	}
+	if len(queue.keys) != 1 || queue.keys[0] != upload.OriginalKey {
+		t.Fatalf("queued keys = %#v, want %q", queue.keys, upload.OriginalKey)
+	}
+
+	stale := requestWithHandler(t, handler, http.MethodPost, "/admin/photos/"+upload.PhotoID+"/retry", `{"version":2}`)
+	if stale.Code != http.StatusConflict {
+		t.Fatalf("stale retry status = %d, want %d; body = %s", stale.Code, http.StatusConflict, stale.Body.String())
+	}
+	assertErrorCode(t, stale, "version_conflict")
+}
+
+func TestAdminPhotoRetryRequiresConfiguredQueue(t *testing.T) {
+	handler := NewHandlerWithOriginals(gallery.NewSeedRepository(), fakeOriginalStore{})
+	response := requestWithHandler(t, handler, http.MethodPost, "/admin/photos/drawing-01/retry", `{"version":1}`)
+	if response.Code != http.StatusNotImplemented {
+		t.Fatalf("retry without queue status = %d, want %d; body = %s", response.Code, http.StatusNotImplemented, response.Body.String())
+	}
+	assertErrorCode(t, response, "processing_not_configured")
+}
+
+func TestAdminPhotoDeleteRemovesArchivedUploadAfterAssetCleanup(t *testing.T) {
+	repository := gallery.NewSeedRepository()
+	assets := &fakePhotoAssetDeleter{}
+	handler := NewHandlerWithAdminStorage(repository, fakeOriginalStore{}, "https://media.example.test", nil, assets)
+
+	prepared := requestWithHandler(t, handler, http.MethodPost, "/admin/uploads", `{"filename":"delete.jpg","contentType":"image/jpeg","size":2048}`)
+	if prepared.Code != http.StatusCreated {
+		t.Fatalf("prepare upload status = %d, want %d; body = %s", prepared.Code, http.StatusCreated, prepared.Body.String())
+	}
+	var upload createUploadResponse
+	decodeJSON(t, prepared, &upload)
+	created := requestWithHandler(t, handler, http.MethodPost, "/admin/photos", fmt.Sprintf(`{"uploadId":%q,"originalKey":%q,"title":"Delete","collectionId":"drawings","width":1200,"height":1600,"altText":"Delete"}`, upload.PhotoID, upload.OriginalKey))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create uploaded photo status = %d, want %d; body = %s", created.Code, http.StatusCreated, created.Body.String())
+	}
+	archived := requestWithHandler(t, handler, http.MethodPost, "/admin/photos/"+upload.PhotoID+"/archive", `{"version":1}`)
+	if archived.Code != http.StatusOK {
+		t.Fatalf("archive status = %d, want %d; body = %s", archived.Code, http.StatusOK, archived.Body.String())
+	}
+
+	wrongConfirmation := requestWithHandler(t, handler, http.MethodDelete, "/admin/photos/"+upload.PhotoID, `{"version":2,"confirmationId":"wrong"}`)
+	if wrongConfirmation.Code != http.StatusBadRequest {
+		t.Fatalf("wrong confirmation status = %d, want %d; body = %s", wrongConfirmation.Code, http.StatusBadRequest, wrongConfirmation.Body.String())
+	}
+	assertErrorCode(t, wrongConfirmation, "invalid_confirmation")
+
+	deleted := requestWithHandler(t, handler, http.MethodDelete, "/admin/photos/"+upload.PhotoID, fmt.Sprintf(`{"version":2,"confirmationId":%q}`, upload.PhotoID))
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("delete status = %d, want %d; body = %s", deleted.Code, http.StatusNoContent, deleted.Body.String())
+	}
+	if assets.photoID != upload.PhotoID || assets.originalKey != upload.OriginalKey {
+		t.Fatalf("asset cleanup = %#v, want %q and %q", assets, upload.PhotoID, upload.OriginalKey)
+	}
+	detail := requestWithHandler(t, handler, http.MethodGet, "/admin/photos/"+upload.PhotoID, "")
+	if detail.Code != http.StatusNotFound {
+		t.Fatalf("deleted admin photo status = %d, want %d", detail.Code, http.StatusNotFound)
 	}
 }
 

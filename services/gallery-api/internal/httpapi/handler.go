@@ -16,10 +16,12 @@ import (
 )
 
 type Handler struct {
-	repository     gallery.Repository
-	originals      storage.Presigner
-	mediaBaseURL   string
-	allowedOrigins map[string]struct{}
+	repository      gallery.Repository
+	originals       storage.Presigner
+	processingQueue storage.ProcessingQueue
+	assetDeleter    storage.PhotoAssetDeleter
+	mediaBaseURL    string
+	allowedOrigins  map[string]struct{}
 }
 
 func NewHandler(repository gallery.Repository) http.Handler {
@@ -37,10 +39,27 @@ func NewHandlerWithOriginals(repository gallery.Repository, originals storage.Pr
 // used when a processed upload crosses from a private draft into publication.
 // A blank mediaBaseURL is valid locally and keeps uploaded photos private.
 func NewHandlerWithOriginalsAndMediaBaseURL(repository gallery.Repository, originals storage.Presigner, mediaBaseURL string) http.Handler {
+	return NewHandlerWithOriginalsMediaAndQueue(repository, originals, mediaBaseURL, nil)
+}
+
+// NewHandlerWithOriginalsMediaAndQueue provides the deployed handler with its
+// private-original presigner, public media origin, and optional retry queue.
+// The individual capabilities stay optional so focused local tests can supply
+// only the dependency their route needs.
+func NewHandlerWithOriginalsMediaAndQueue(repository gallery.Repository, originals storage.Presigner, mediaBaseURL string, processingQueue storage.ProcessingQueue) http.Handler {
+	return NewHandlerWithAdminStorage(repository, originals, mediaBaseURL, processingQueue, nil)
+}
+
+// NewHandlerWithAdminStorage adds permanent uploaded-photo cleanup to the
+// deployed handler. A nil assetDeleter remains valid for local seed metadata;
+// only a photo with a private original requires it at deletion time.
+func NewHandlerWithAdminStorage(repository gallery.Repository, originals storage.Presigner, mediaBaseURL string, processingQueue storage.ProcessingQueue, assetDeleter storage.PhotoAssetDeleter) http.Handler {
 	handler := &Handler{
-		repository:   repository,
-		originals:    originals,
-		mediaBaseURL: strings.TrimRight(strings.TrimSpace(mediaBaseURL), "/"),
+		repository:      repository,
+		originals:       originals,
+		processingQueue: processingQueue,
+		assetDeleter:    assetDeleter,
+		mediaBaseURL:    strings.TrimRight(strings.TrimSpace(mediaBaseURL), "/"),
 		// API Gateway owns production CORS later. These local Vite origins make
 		// the service immediately useful without turning every local response
 		// into a permissive wildcard policy.
@@ -564,6 +583,8 @@ func (handler *Handler) adminPhoto(writer http.ResponseWriter, request *http.Req
 			handler.transitionAdminPhoto(writer, request, store, id, gallery.PublicationArchived)
 		case "restore":
 			handler.transitionAdminPhoto(writer, request, store, id, gallery.PublicationDraft)
+		case "retry":
+			handler.retryAdminPhotoProcessing(writer, request, store, id)
 		default:
 			writeError(writer, http.StatusNotFound, "not_found", "photo action not found")
 		}
@@ -584,8 +605,10 @@ func (handler *Handler) adminPhoto(writer http.ResponseWriter, request *http.Req
 		writeJSON(writer, http.StatusOK, photo)
 	case http.MethodPatch:
 		handler.updateAdminPhoto(writer, request, store, id)
+	case http.MethodDelete:
+		handler.deleteAdminPhoto(writer, request, store, id)
 	default:
-		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPatch+", OPTIONS")
+		writeMethodNotAllowed(writer, http.MethodGet+", "+http.MethodPatch+", "+http.MethodDelete+", OPTIONS")
 	}
 }
 
@@ -632,6 +655,11 @@ type updatePhotoRequest struct {
 
 type photoTransitionRequest struct {
 	Version int `json:"version"`
+}
+
+type deletePhotoRequest struct {
+	Version        int    `json:"version"`
+	ConfirmationID string `json:"confirmationId"`
 }
 
 const maxOriginalUploadBytes int64 = 25 << 20
@@ -894,6 +922,108 @@ func (handler *Handler) transitionAdminPhoto(writer http.ResponseWriter, request
 		return
 	}
 	writeJSON(writer, http.StatusOK, next)
+}
+
+// retryAdminPhotoProcessing repairs drafts uploaded before the S3-to-SQS
+// notification pipeline existed, and offers recovery after a failed render.
+// Queue delivery is intentionally the only side effect here: the worker owns
+// transitions to processing, ready, or failed after it actually handles work.
+func (handler *Handler) retryAdminPhotoProcessing(writer http.ResponseWriter, request *http.Request, store gallery.AdminPhotoRepository, id string) {
+	if handler.processingQueue == nil {
+		writeError(writer, http.StatusNotImplemented, "processing_not_configured", "image-processing retries are not configured")
+		return
+	}
+
+	var input photoTransitionRequest
+	if !decodeRequestJSON(writer, request, &input) {
+		return
+	}
+	if input.Version < 1 {
+		writeError(writer, http.StatusBadRequest, "invalid_version", "a positive photo version is required")
+		return
+	}
+
+	photo, found, err := store.GetAdminPhotoByID(request.Context(), id)
+	if err != nil {
+		writeRepositoryError(writer, err)
+		return
+	}
+	if !found {
+		writeError(writer, http.StatusNotFound, "not_found", "photo not found")
+		return
+	}
+	if input.Version != photo.Version {
+		writeError(writer, http.StatusConflict, "version_conflict", "photo was changed by another request; reload and try again")
+		return
+	}
+	if photo.OriginalKey == "" {
+		writeError(writer, http.StatusConflict, "original_not_found", "this photo has no original image to process")
+		return
+	}
+	if photo.ProcessingStatus != gallery.ProcessingPending && photo.ProcessingStatus != gallery.ProcessingFailed {
+		writeError(writer, http.StatusConflict, "processing_not_retryable", "only pending or failed image processing can be retried")
+		return
+	}
+	if err := handler.processingQueue.EnqueueOriginal(request.Context(), photo.OriginalKey); err != nil {
+		log.Printf("retry processing for %q: %v", id, err)
+		writeError(writer, http.StatusBadGateway, "processing_enqueue_failed", "unable to queue image processing")
+		return
+	}
+
+	writeJSON(writer, http.StatusAccepted, map[string]any{"photo": photo, "status": "queued"})
+}
+
+// deleteAdminPhoto is deliberately stricter than archive. Archiving removes a
+// work from public responses but preserves the record for recovery; deletion
+// requires the archived state and an exact typed identifier before destroying
+// private source data, derivatives, and canonical metadata.
+func (handler *Handler) deleteAdminPhoto(writer http.ResponseWriter, request *http.Request, store gallery.AdminPhotoRepository, id string) {
+	var input deletePhotoRequest
+	if !decodeRequestJSON(writer, request, &input) {
+		return
+	}
+	if input.Version < 1 {
+		writeError(writer, http.StatusBadRequest, "invalid_version", "a positive photo version is required")
+		return
+	}
+
+	photo, found, err := store.GetAdminPhotoByID(request.Context(), id)
+	if err != nil {
+		writeRepositoryError(writer, err)
+		return
+	}
+	if !found {
+		writeError(writer, http.StatusNotFound, "not_found", "photo not found")
+		return
+	}
+	if photo.Status != gallery.PublicationArchived {
+		writeError(writer, http.StatusConflict, "photo_not_archived", "archive the photo before permanently deleting it")
+		return
+	}
+	if input.Version != photo.Version {
+		writeError(writer, http.StatusConflict, "version_conflict", "photo was changed by another request; reload and try again")
+		return
+	}
+	if strings.TrimSpace(input.ConfirmationID) != photo.ID {
+		writeError(writer, http.StatusBadRequest, "invalid_confirmation", "type the exact photo ID to confirm permanent deletion")
+		return
+	}
+	if photo.OriginalKey != "" {
+		if handler.assetDeleter == nil {
+			writeError(writer, http.StatusNotImplemented, "asset_cleanup_not_configured", "uploaded photo cleanup is not configured")
+			return
+		}
+		if err := handler.assetDeleter.DeletePhotoAssets(request.Context(), photo.ID, photo.OriginalKey); err != nil {
+			log.Printf("delete assets for %q: %v", photo.ID, err)
+			writeError(writer, http.StatusBadGateway, "asset_cleanup_failed", "unable to remove private image assets")
+			return
+		}
+	}
+	if err := store.DeleteAdminPhoto(request.Context(), photo); err != nil {
+		writePhotoStoreError(writer, err)
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 func (handler *Handler) saveAdminPhoto(writer http.ResponseWriter, request *http.Request, store gallery.AdminPhotoRepository, previous, next gallery.AdminPhoto) bool {
