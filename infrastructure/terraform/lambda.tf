@@ -22,8 +22,11 @@ resource "aws_lambda_function" "gallery_api" {
   # this in Lambda so production fails clearly rather than serving stale data.
   environment {
     variables = {
-      GALLERY_METADATA_TABLE   = aws_dynamodb_table.gallery_metadata.name
-      GALLERY_ORIGINALS_BUCKET = aws_s3_bucket.gallery_originals.bucket
+      GALLERY_METADATA_TABLE        = aws_dynamodb_table.gallery_metadata.name
+      GALLERY_ORIGINALS_BUCKET      = aws_s3_bucket.gallery_originals.bucket
+      GALLERY_PROCESSING_QUEUE_URL  = aws_sqs_queue.gallery_image_processing.url
+      GALLERY_DERIVATIVES_BUCKET    = aws_s3_bucket.gallery_derivatives.bucket
+      GALLERY_MEDIA_DISTRIBUTION_ID = try(aws_cloudfront_distribution.gallery_media[0].id, "")
       # The API leaves uploaded drafts unpublished until this is configured.
       # It never treats the private S3 derivative key as a browser URL.
       GALLERY_MEDIA_BASE_URL = local.media_base_url
@@ -36,6 +39,8 @@ resource "aws_lambda_function" "gallery_api" {
     aws_iam_role_policy.gallery_api_metadata_read,
     aws_iam_role_policy.gallery_api_metadata_write,
     aws_iam_role_policy.gallery_api_originals,
+    aws_iam_role_policy.gallery_api_processing_queue,
+    aws_iam_role_policy.gallery_api_derivative_cleanup,
   ]
 }
 

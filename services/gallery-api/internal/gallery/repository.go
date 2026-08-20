@@ -47,6 +47,7 @@ type AdminPhotoRepository interface {
 	GetAdminPhotoByID(ctx context.Context, id string) (AdminPhoto, bool, error)
 	CreateAdminPhoto(ctx context.Context, photo AdminPhoto) error
 	UpdateAdminPhoto(ctx context.Context, previous, next AdminPhoto) error
+	DeleteAdminPhoto(ctx context.Context, photo AdminPhoto) error
 	ReorderAdminPhotos(ctx context.Context, previous, next []AdminPhoto) error
 }
 
@@ -192,6 +193,21 @@ func (repository *MemoryRepository) UpdateAdminPhoto(_ context.Context, previous
 
 	repository.replaceAdminPhoto(previous.ID, next)
 	repository.reconcilePublicPhoto(current, next)
+	return nil
+}
+
+func (repository *MemoryRepository) DeleteAdminPhoto(_ context.Context, photo AdminPhoto) error {
+	current, found := repository.adminPhotosByID[photo.ID]
+	if !found || current.Version != photo.Version {
+		return ErrVersionConflict
+	}
+	for index, candidate := range repository.adminPhotos {
+		if candidate.ID == photo.ID {
+			repository.adminPhotos = append(repository.adminPhotos[:index], repository.adminPhotos[index+1:]...)
+			break
+		}
+	}
+	delete(repository.adminPhotosByID, photo.ID)
 	return nil
 }
 

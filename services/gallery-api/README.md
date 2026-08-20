@@ -37,8 +37,9 @@ using the returned opaque upload fields.
 Camera RAW formats are intentionally unsupported. The 25 MB limit protects the
 upload path; it is not a public delivery format. The deployed Go/libvips worker
 creates normalized WebP derivatives and applies lifecycle cleanup to a
-successful private processing input. Its S3, SQS, derivative bucket, and
-container Lambda path have passed a live upload smoke test.
+successful private processing input, which expires about 30 days after object
+creation. Its S3, SQS, derivative bucket, and container Lambda path have
+passed a live upload smoke test.
 
 `GET /admin/photos/{id}/preview` returns a 10-minute authenticated preview URL
 for that private original. This deployed upload flow has been smoke-tested.
@@ -50,6 +51,14 @@ derivative and marks the photo ready. It is then also blocked until
 `GALLERY_MEDIA_BASE_URL` names the public CloudFront media distribution backed
 by the private derivatives bucket; the API derives the server-managed public
 `Src` during the publish transition.
+
+`POST /admin/photos/{id}/retry` re-enqueues a pending or failed upload when its
+private original is still available. This repairs early uploads made before the
+worker was enabled without giving the browser direct access to SQS. Permanent
+deletion is limited to archived photos and requires the exact immutable photo
+ID as confirmation. The API then removes the private original and all
+`derivatives/{photo-id}/` objects, and invalidates that derivative prefix in
+CloudFront before deleting metadata.
 
 ## Image worker
 

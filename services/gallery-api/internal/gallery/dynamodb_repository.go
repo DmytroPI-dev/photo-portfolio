@@ -410,6 +410,21 @@ func (repository *DynamoRepository) UpdateAdminPhoto(ctx context.Context, previo
 	return writeError("update admin photo", err, ErrVersionConflict)
 }
 
+// DeleteAdminPhoto removes the private canonical document and its admin-list
+// entry atomically. The handler permits this only after archive has removed
+// public copies and after object cleanup has completed.
+func (repository *DynamoRepository) DeleteAdminPhoto(ctx context.Context, photo AdminPhoto) error {
+	_, err := repository.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
+		TransactItems: []types.TransactWriteItem{
+			conditionalDelete(repository.table, key(photoPartition(photo.ID), canonicalAdminSortKey), "#version = :version", map[string]string{"#version": "Version"}, map[string]types.AttributeValue{
+				":version": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", photo.Version)},
+			}),
+			deleteItem(repository.table, key(adminPhotosPartition, adminPhotoIndexSortKey(photo))),
+		},
+	})
+	return writeError("delete admin photo", err, ErrVersionConflict)
+}
+
 func (repository *DynamoRepository) UpdateAdminPhotoForPublishedCollection(ctx context.Context, previous, next AdminPhoto, collection AdminCollection) error {
 	items, err := repository.adminPhotoUpdateItems(previous, next)
 	if err != nil {
