@@ -34,8 +34,10 @@ Origin Access Control at `media.photo-gallery.i-dmytro.org`. Cloudflare is the
 DNS provider for that hostname and remains DNS-only; it does not proxy media.
 The distribution returns permissive, credential-free CORS headers so the
 Azure-hosted Three.js gallery can safely load images as GPU textures. The
-gallery still uses local metadata and placeholders until its API integration is
-implemented, while the admin SPA remains local-only.
+gallery can now read published metadata and CloudFront media from the API when
+its Vite build receives `VITE_GALLERY_API_URL`; bundled images remain an
+intentional fallback during an API outage or local development. The admin SPA
+remains local-only.
 
 The collection restore flow is deployed and smoke-tested. Role-specific access
 for additional administrators is an optional future capability.
@@ -130,6 +132,16 @@ npm run dev
 
 The gallery normally runs at `http://localhost:5173`.
 
+To test the published-gallery integration locally, create `.env.local` with:
+
+```bash
+VITE_GALLERY_API_URL=https://m02dauw9h9.execute-api.eu-central-1.amazonaws.com
+```
+
+For the Azure production build, set the GitHub Actions repository variable
+`GALLERY_API_BASE_URL` to that same public API origin. The value is public
+configuration, not a secret.
+
 ```bash
 npm run build
 ```
@@ -214,8 +226,8 @@ The Lambda artifact must be rebuilt before planning an API deployment:
 
 ## Next Work
 
-1. Connect the Azure gallery to public API metadata and CloudFront media URLs,
-   preserving local artwork as a fallback during the incremental migration.
+1. Set the Azure build's `GALLERY_API_BASE_URL` repository variable and verify
+   the deployed gallery reads published API metadata and CloudFront media.
 2. Smoke-test the image-processing failure/retry/DLQ path.
 3. Add selective Google Photos import through the Picker API, copying only
    administrator-selected images into the same private S3 processing flow.

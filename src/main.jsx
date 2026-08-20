@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "./index.css";
 import App from "./App";
+import { GalleryDataProvider } from "./data/galleryData";
 
 const rootElement = document.getElementById("root");
 
@@ -15,6 +16,8 @@ const root = window.__photoPortfolioRoot || (window.__photoPortfolioRoot = React
 
 root.render(
   <React.StrictMode>
-    <App />
+    <GalleryDataProvider>
+      <App />
+    </GalleryDataProvider>
   </React.StrictMode>
 );
