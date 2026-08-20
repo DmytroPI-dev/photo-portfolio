@@ -5,7 +5,6 @@ import {
 import { useFrame } from "@react-three/fiber";
 import { Suspense, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { getPhotoById } from "../../data/photos";
 import CameraRig from "./CameraRig";
 import PhotoPanel from "./PhotoPanel";
 
@@ -152,11 +151,7 @@ export default function SpatialGalleryScene({
       </mesh>
 
       <CameraRig
-        selectedPlacement={
-          selectedPlacement && getPhotoById(selectedPlacement.photoId)
-            ? selectedPlacement
-            : null
-        }
+        selectedPlacement={selectedPlacement ?? null}
       />
     </>
   );

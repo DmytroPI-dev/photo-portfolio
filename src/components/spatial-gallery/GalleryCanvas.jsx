@@ -1,25 +1,36 @@
 import { Box, Stack, Text } from "@chakra-ui/react";
 import { Canvas } from "@react-three/fiber";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { homeFloors } from "../../data/homeFloors";
 import SpatialGalleryScene from "./SpatialGalleryScene";
 
-export default function GalleryCanvas() {
+export default function GalleryCanvas({ floors }) {
   const [selectedPhotoId, setSelectedPhotoId] = useState(null);
   const [activeFloorIndex, setActiveFloorIndex] = useState(0);
   const galleryRef = useRef(null);
   const lastFloorMoveAt = useRef(0);
   const touchStartY = useRef(null);
 
-  const activeFloor = homeFloors[activeFloorIndex] ?? homeFloors[0];
+  const activeFloor = floors[activeFloorIndex] ?? floors[0];
+
+  useEffect(() => {
+    // Remote metadata can add or remove a collection after the fallback scene
+    // first renders. Keep the elevator on a valid floor rather than leaving a
+    // stale index pointed past the end of the refreshed snapshot. Clear an
+    // artwork selection at the same time, because that ID may only exist in
+    // the bundled fallback data.
+    setSelectedPhotoId(null);
+    setActiveFloorIndex((currentIndex) =>
+      Math.min(currentIndex, Math.max(floors.length - 1, 0))
+    );
+  }, [floors.length]);
 
   const moveFloor = useCallback((direction) => {
     setSelectedPhotoId(null);
     setActiveFloorIndex((currentIndex) => {
-      const lastFloorIndex = homeFloors.length - 1;
+      const lastFloorIndex = floors.length - 1;
       return Math.min(Math.max(currentIndex + direction, 0), lastFloorIndex);
     });
-  }, []);
+  }, [floors.length]);
 
   const jumpToFloor = useCallback((nextIndex) => {
     setSelectedPhotoId(null);
@@ -111,7 +122,7 @@ export default function GalleryCanvas() {
         onPointerMissed={() => setSelectedPhotoId(null)}
       >
         <SpatialGalleryScene
-          floors={homeFloors}
+          floors={floors}
           activeFloorIndex={activeFloorIndex}
           selectedPhotoId={selectedPhotoId}
           onSelect={(photoId) =>
@@ -131,7 +142,7 @@ export default function GalleryCanvas() {
         zIndex={2}
         align="center"
       >
-        {homeFloors.map((floor, index) => (
+        {floors.map((floor, index) => (
           <Box
             as="button"
             key={floor.id}
@@ -177,7 +188,7 @@ export default function GalleryCanvas() {
           letterSpacing="0.14em"
           color="whiteAlpha.600"
         >
-          Floor {activeFloorIndex + 1} / {homeFloors.length}
+          Floor {activeFloorIndex + 1} / {floors.length}
         </Text>
         <Text fontSize="xl" fontWeight="semibold">
           {activeFloor.title}

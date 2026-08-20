@@ -1,4 +1,5 @@
-import { featuredPhotos, getPhotosByCollection } from "./photos";
+import { collections as fallbackCollections } from "./collections";
+import { photos as fallbackPhotos } from "./photos";
 
 const MAX_PHOTOS_PER_FLOOR = 7;
 
@@ -61,50 +62,58 @@ const createPlacements = (photos) => {
   }));
 };
 
-const drawingPhotos = getPhotosByCollection("drawings");
-const naturePhotos = getPhotosByCollection("nature");
-const travelPhotos = getPhotosByCollection("travel");
+const floorAccents = ["#f2b263", "#daad7b", "#9ec6a3", "#9fb6df"];
 
-export const homeFloors = [
-  {
-    id: "featured",
-    title: "Selected Work",
-    label: "Home",
-    description: "A first pass through drawings, nature, and travel studies.",
-    accent: "#f2b263",
-    route: "/drawings",
-    photos: featuredPhotos.slice(0, MAX_PHOTOS_PER_FLOOR),
-  },
-  {
-    id: "drawings",
-    title: "Drawings",
-    label: "Drawings",
-    description: "Hand-drawn pieces presented as the first dedicated room.",
-    accent: "#daad7b",
-    route: "/drawings",
-    photos: drawingPhotos,
-  },
-  {
-    id: "nature",
-    title: "Nature",
-    label: "Nature",
-    description: "Quiet outdoor scenes and organic details.",
-    accent: "#9ec6a3",
-    route: "/nature",
-    photos: naturePhotos,
-  },
-  {
-    id: "travel",
-    title: "Travel",
-    label: "Travel",
-    description: "Places, routes, and small observations from the road.",
-    accent: "#9fb6df",
-    route: "/travel",
-    photos: travelPhotos,
-  },
-].map((floor, index) => ({
-  ...floor,
-  index,
-  photos: floor.photos.slice(0, MAX_PHOTOS_PER_FLOOR),
-  placements: createPlacements(floor.photos),
-}));
+// Home is data-driven so newly published administrator collections can appear
+// without a separate frontend release. The familiar first "Selected Work"
+// floor remains, followed by the API's ordered published collections.
+export const createHomeFloors = (collections, photos) => {
+  const orderedCollections = [...collections].sort((left, right) => left.order - right.order);
+  const photosByCollection = new Map(
+    orderedCollections.map((collection) => [
+      collection.id,
+      photos
+        .filter((photo) => photo.collectionId === collection.id)
+        .sort((left, right) => left.order - right.order),
+    ])
+  );
+  const featuredPhotos = photos
+    .filter((photo) => photo.featured)
+    .sort((left, right) => left.order - right.order);
+  const firstCollection = orderedCollections[0];
+
+  const floors = [
+    {
+      id: "featured",
+      title: "Selected Work",
+      label: "Home",
+      description: "A first pass through drawings, nature, and travel studies.",
+      accent: floorAccents[0],
+      route: firstCollection ? `/${firstCollection.slug}` : "/",
+      photos: featuredPhotos.length ? featuredPhotos : photos,
+    },
+    ...orderedCollections.map((collection, index) => ({
+      id: collection.id,
+      title: collection.title,
+      label: collection.title,
+      description: collection.description,
+      accent: floorAccents[(index + 1) % floorAccents.length],
+      route: `/${collection.slug}`,
+      photos: photosByCollection.get(collection.id) ?? [],
+    })),
+  ];
+
+  return floors.map((floor, index) => {
+    const visiblePhotos = floor.photos.slice(0, MAX_PHOTOS_PER_FLOOR);
+    return {
+      ...floor,
+      index,
+      photos: visiblePhotos,
+      placements: createPlacements(visiblePhotos),
+    };
+  });
+};
+
+// Existing imports keep working for local tooling. Page components use
+// createHomeFloors with the provider snapshot so production can use the API.
+export const homeFloors = createHomeFloors(fallbackCollections, fallbackPhotos);

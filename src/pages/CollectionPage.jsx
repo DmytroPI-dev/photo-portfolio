@@ -9,31 +9,39 @@ import DrawingRoomGallery from "../components/drawing-room/DrawingRoomGallery";
 import NatureGallery from "../components/nature-room/NatureGallery";
 import NotFoundPage from "./NotFoundPage";
 import { useParams } from "react-router-dom";
-import { getCollectionById } from "../data/collections";
-import { getPhotosByCollection } from "../data/photos";
+import { useGalleryData } from "../data/galleryData";
 
 export default function CollectionPage() {
   const { collectionId } = useParams();
-  const collection = getCollectionById(collectionId);
+  const { collections, photos, isLoading } = useGalleryData();
+  const collection = collections.find(
+    (candidate) => candidate.id === collectionId || candidate.slug === collectionId
+  );
 
   if (!collection) {
+    if (isLoading) {
+      return <Box minH="100vh" bg="black" aria-busy="true" />;
+    }
+
     // `/:collectionId` also matches unknown one-segment URLs. Render the 404
     // page here instead of redirecting, so the address bar keeps the URL the
     // visitor attempted to open.
     return <NotFoundPage />;
   }
 
-  const photos = getPhotosByCollection(collection.id);
+  const collectionPhotos = photos
+    .filter((photo) => photo.collectionId === collection.id)
+    .sort((left, right) => left.order - right.order);
 
   // Drawings and Nature now have collection-specific WebGL rooms. Travel stays
   // on the stable 2D contact sheet until it gets its own documentary/memory-wall
   // treatment.
   if (collection.id === "drawings") {
-    return <DrawingRoomGallery collection={collection} photos={photos} />;
+    return <DrawingRoomGallery collection={collection} photos={collectionPhotos} />;
   }
 
   if (collection.id === "nature") {
-    return <NatureGallery collection={collection} photos={photos} />;
+    return <NatureGallery collection={collection} photos={collectionPhotos} />;
   }
 
   return (
@@ -61,7 +69,7 @@ export default function CollectionPage() {
         </Text>
       </Stack>
 
-      <ContactSheetGallery photos={photos} />
+      <ContactSheetGallery photos={collectionPhotos} />
     </Box>
   );
 }

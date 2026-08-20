@@ -8,9 +8,17 @@ import {
 import { Link as RouterLink } from "react-router-dom";
 import ContactSheetGallery from "../components/gallery/ContactSheetGallery";
 import GalleryCanvas from "../components/spatial-gallery/GalleryCanvas";
-import { homeFloors } from "../data/homeFloors";
+import { useMemo } from "react";
+import { useGalleryData } from "../data/galleryData";
+import { createHomeFloors } from "../data/homeFloors";
 
 export default function HomePage() {
+  const { collections, photos } = useGalleryData();
+  const homeFloors = useMemo(
+    () => createHomeFloors(collections, photos),
+    [collections, photos]
+  );
+
   return (
     <Box>
       <Box
@@ -20,7 +28,7 @@ export default function HomePage() {
         position="relative"
       >
         <Box display={{ base: "none", md: "block" }} h="100vh">
-          <GalleryCanvas />
+          <GalleryCanvas floors={homeFloors} />
         </Box>
         <Box
           display={{ base: "none", md: "block" }}
